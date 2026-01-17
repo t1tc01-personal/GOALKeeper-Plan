@@ -1,0 +1,25 @@
+app:
+  name: "GOALKeeper-Plan"
+  environment: "development"
+  version: "1.0.0"
+  serviceName: "goalkeeper-plan-api"
+  serverName: "goalkeeper-plan"
+  debug: true
+  timezone: "UTC"
+  port: "${PORT}"
+
+postgres:
+  connectionString: "${POSTGRES_CONNECTION_STRING}"
+  maxOpenConnections: 25
+  maxIdleConnections: 5
+  maxConnectionLifetime: 300
+  maxConnectionIdleTime: 60
+
+auth:
+  secret: "${AUTH_SECRET}"
+
+redis:
+  redisHost: "${REDIS_HOST}"
+  redisPort: "${REDIS_PORT}"
+  redisPassword: "${REDIS_PASSWORD}"
+
