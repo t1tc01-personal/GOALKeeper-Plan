@@ -116,15 +116,6 @@ export async function POST(
       const cleanBaseUrl = baseUrl.replace(/\/$/, '')
       const redirectUri = `${cleanBaseUrl}/auth/${provider}/callback`
       
-      console.log('Google OAuth exchange debug:', {
-        baseUrl,
-        cleanBaseUrl,
-        redirectUri,
-        hasClientId: !!googleClientId,
-        hasClientSecret: !!googleClientSecret,
-        codeLength: code?.length || 0,
-      })
-      
       const response = await fetch('https://oauth2.googleapis.com/token', {
         method: 'POST',
         headers: {
