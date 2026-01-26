@@ -7,6 +7,30 @@ app:
   debug: true
   timezone: "UTC"
   port: "${PORT}"
+  cors:
+    allowedOrigins:
+      - "${FRONTEND_URL}"
+    allowedMethods:
+      - "GET"
+      - "POST"
+      - "PUT"
+      - "DELETE"
+      - "PATCH"
+      - "OPTIONS"
+    allowedHeaders:
+      - "Content-Type"
+      - "Content-Length"
+      - "Accept-Encoding"
+      - "X-CSRF-Token"
+      - "Authorization"
+      - "accept"
+      - "origin"
+      - "Cache-Control"
+      - "X-Requested-With"
+    exposedHeaders:
+      - "Authorization"
+    allowCredentials: true
+    maxAge: 86400  # 24 hours
 
 postgres:
   connectionString: "${POSTGRES_CONNECTION_STRING}"
@@ -17,6 +41,14 @@ postgres:
 
 auth:
   secret: "${AUTH_SECRET}"
+  jwtExpiration: 24
+  refreshExpiration: 7
+  githubClientId: "${GITHUB_CLIENT_ID}"
+  githubSecret: "${GITHUB_CLIENT_SECRET}"
+  googleClientId: "${GOOGLE_CLIENT_ID}"
+  googleSecret: "${GOOGLE_CLIENT_SECRET}"
+  frontendUrl: "${FRONTEND_URL}"
+  backendUrl: "${BACKEND_URL}"
 
 redis:
   redisHost: "${REDIS_HOST}"

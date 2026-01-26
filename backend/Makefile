@@ -1,51 +1,57 @@
-.PHONY: help build run test clean deps lint fmt
+.PHONY: swagger
+swagger:
+	swag init -g cmd/main.go -o docs
 
-help: ## Show this help message
-	@echo 'Usage: make [target]'
-	@echo ''
-	@echo 'Available targets:'
-	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-15s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+.PHONY: build
+build:
+	go build -o bin/server ./cmd/main.go
 
-build: ## Build the application
-	@echo "Building application..."
-	@go build -o bin/goalkeeper-plan-api cmd/main.go
+.PHONY: run
+run:
+	go run ./cmd/main.go api
 
-run: ## Run the application
-	@echo "Running application..."
-	@go run cmd/main.go api
+.PHONY: test
+test:
+	go test ./...
 
-test: ## Run tests
-	@echo "Running tests..."
-	@go test -v ./...
+.PHONY: clean
+clean:
+	rm -rf bin/
+	rm -rf docs/
 
-test-coverage: ## Run tests with coverage
-	@echo "Running tests with coverage..."
-	@go test -coverprofile=coverage.out ./...
-	@go tool cover -html=coverage.out -o coverage.html
+# Load environment variables from .env file
+include .env
+export
 
-clean: ## Clean build artifacts
-	@echo "Cleaning..."
-	@rm -rf bin/
-	@rm -f coverage.out coverage.html
+.PHONY: migrate-apply
+migrate-apply:
+	@if [ -z "$(POSTGRES_CONNECTION_STRING)" ]; then \
+		echo "Error: POSTGRES_CONNECTION_STRING not set in .env file"; \
+		exit 1; \
+	fi
+	atlas migrate apply --env local --url "$(POSTGRES_CONNECTION_STRING)"
 
-deps: ## Download dependencies
-	@echo "Downloading dependencies..."
-	@go mod download
-	@go mod tidy
+.PHONY: migrate-status
+migrate-status:
+	@if [ -z "$(POSTGRES_CONNECTION_STRING)" ]; then \
+		echo "Error: POSTGRES_CONNECTION_STRING not set in .env file"; \
+		exit 1; \
+	fi
+	atlas migrate status --env local --url "$(POSTGRES_CONNECTION_STRING)"
 
-lint: ## Run linter
-	@echo "Running linter..."
-	@golangci-lint run ./... || echo "golangci-lint not installed, skipping..."
+.PHONY: migrate-validate
+migrate-validate:
+	@if [ -z "$(POSTGRES_CONNECTION_STRING)" ]; then \
+		echo "Error: POSTGRES_CONNECTION_STRING not set in .env file"; \
+		exit 1; \
+	fi
+	atlas migrate validate --env local --url "$(POSTGRES_CONNECTION_STRING)"
 
-fmt: ## Format code
-	@echo "Formatting code..."
-	@go fmt ./...
-
-vet: ## Run go vet
-	@echo "Running go vet..."
-	@go vet ./...
-
-mod-verify: ## Verify dependencies
-	@echo "Verifying dependencies..."
-	@go mod verify
-
+.PHONY: migrate-new
+migrate-new:
+	@if [ -z "$(POSTGRES_CONNECTION_STRING)" ]; then \
+		echo "Error: POSTGRES_CONNECTION_STRING not set in .env file"; \
+		exit 1; \
+	fi
+	@read -p "Enter migration name: " name; \
+	atlas migrate new --env local --dir file://migrations $$name

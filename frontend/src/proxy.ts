@@ -9,7 +9,13 @@ export async function proxy(req: NextRequest) {
   const isAuth = await verifyInMiddleware(req)
   const roles = isAuth ? await getUserRole(req) : []
 
-  if (!isAuth && pathname !== '/login' && pathname !== '/auth/callback') {
+  // Allow OAuth callback routes and signup
+  const isAuthRoute = pathname === '/login' || 
+                      pathname === '/signup' || 
+                      pathname.startsWith('/auth/') ||
+                      pathname.startsWith('/api/')
+
+  if (!isAuth && !isAuthRoute) {
     return NextResponse.redirect(loginUrl)
   }
 

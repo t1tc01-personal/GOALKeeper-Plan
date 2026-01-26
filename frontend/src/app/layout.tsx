@@ -4,7 +4,6 @@ import './globals.css'
 import { Toaster } from '@/components/ui/sonner'
 import QueryProvider from '@/shared/contexts/QueryProvider'
 import AuthProvider from '@/shared/contexts/AuthProvider'
-import { getAuthToken } from '@/shared/lib/authCookie'
 import NextTopLoader from 'nextjs-toploader'
 
 const inter = Inter({
@@ -17,18 +16,16 @@ export const metadata: Metadata = {
   description: 'GOALKeeper Plan is a platform for goal management and planning',
 }
 
-export default async function RootLayout({
+export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode
 }>) {
-  const token = await getAuthToken()
-  const isAuthenticated = !!token
   return (
     <html lang="en">
       <body className={`${inter.variable} antialiased`}>
         <QueryProvider>
-          <AuthProvider isAuthenticated={isAuthenticated}>
+          <AuthProvider>
             {children}
           </AuthProvider>
           <NextTopLoader color="#5163FF" showSpinner={false} />

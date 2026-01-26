@@ -60,10 +60,29 @@ frontend/
 
 Create a `.env.local` file in the root directory:
 
-```
+```env
+# API Configuration
 NEXT_PUBLIC_API_URL=http://localhost:8000
-NEXT_PUBLIC_DOMAIN=localhost
+NEXT_PUBLIC_DOMAIN=http://localhost:3000
+
+# OAuth Client IDs (used in frontend - can use NEXT_PUBLIC_* prefix or without)
+GITHUB_CLIENT_ID=your_github_client_id
+GOOGLE_CLIENT_ID=your_google_client_id
+
+# OAuth Client Secrets (server-side only, for token exchange)
+GITHUB_CLIENT_SECRET=your_github_client_secret
+GOOGLE_CLIENT_SECRET=your_google_client_secret
 ```
+
+**Important:** 
+- `NEXT_PUBLIC_DOMAIN` should be set to `http://localhost:3000` (full URL with protocol)
+- `GITHUB_CLIENT_ID` and `GOOGLE_CLIENT_ID` are used in frontend to generate OAuth URLs
+  - You can use `NEXT_PUBLIC_GITHUB_CLIENT_ID` and `NEXT_PUBLIC_GOOGLE_CLIENT_ID` instead if preferred
+  - The code supports both naming conventions
+- `GITHUB_CLIENT_SECRET` and `GOOGLE_CLIENT_SECRET` are only used in Next.js API routes (server-side)
+- OAuth redirect URIs must be configured in your OAuth provider apps:
+  - GitHub: `http://localhost:3000/auth/github/callback`
+  - Google: `http://localhost:3000/auth/google/callback`
 
 ## Learn More
 

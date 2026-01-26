@@ -20,14 +20,25 @@ type Configurations struct {
 }
 
 type AppConfig struct {
-	Name        string `mapstructure:"name"`
-	Environment string `mapstructure:"environment"`
-	Version     string `mapstructure:"version"`
-	ServiceName string `mapstructure:"serviceName"`
-	ServerName  string `mapstructure:"serverName"`
-	Debug       bool   `mapstructure:"debug"`
-	Timezone    string `mapstructure:"timezone"`
-	Port        string `mapstructure:"port"`
+	Name        string     `mapstructure:"name"`
+	Environment string     `mapstructure:"environment"`
+	Version     string     `mapstructure:"version"`
+	ServiceName string     `mapstructure:"serviceName"`
+	ServerName  string     `mapstructure:"serverName"`
+	Debug       bool       `mapstructure:"debug"`
+	Timezone    string     `mapstructure:"timezone"`
+	Port        string     `mapstructure:"port"`
+	CORS        CORSConfig `mapstructure:"cors"`
+}
+
+// CORSConfig - Configuration for CORS
+type CORSConfig struct {
+	AllowedOrigins   []string `mapstructure:"allowedOrigins"`
+	AllowedMethods   []string `mapstructure:"allowedMethods"`
+	AllowedHeaders   []string `mapstructure:"allowedHeaders"`
+	ExposedHeaders   []string `mapstructure:"exposedHeaders"`
+	AllowCredentials bool     `mapstructure:"allowCredentials"`
+	MaxAge           int      `mapstructure:"maxAge"` // in seconds
 }
 
 // PoolConfig - Configuration for pool
@@ -46,7 +57,15 @@ type PostgresConfig struct {
 
 // AuthConfig - Configuration for Auth
 type AuthConfig struct {
-	Secret string `mapstructure:"secret"`
+	Secret            string `mapstructure:"secret"`
+	JWTExpiration     int    `mapstructure:"jwtExpiration"`     // in hours
+	RefreshExpiration int    `mapstructure:"refreshExpiration"` // in days
+	GitHubClientID    string `mapstructure:"githubClientId"`
+	GitHubSecret      string `mapstructure:"githubSecret"`
+	GoogleClientID    string `mapstructure:"googleClientId"`
+	GoogleSecret      string `mapstructure:"googleSecret"`
+	FrontendURL       string `mapstructure:"frontendUrl"`
+	BackendURL        string `mapstructure:"backendUrl"`
 }
 
 type RedisConfig struct {

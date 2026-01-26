@@ -9,11 +9,16 @@ import (
 
 // User represents an application user
 type User struct {
-	ID        uuid.UUID `gorm:"type:uuid;primary_key;default:gen_random_uuid()" json:"id"`
-	Email     string    `gorm:"uniqueIndex;not null" json:"email"`
-	Name      string    `gorm:"not null;size:100" json:"name"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID              uuid.UUID  `gorm:"type:uuid;primary_key;default:gen_random_uuid()" json:"id"`
+	Email           string     `gorm:"uniqueIndex;not null" json:"email"`
+	Name            string     `gorm:"not null;size:100" json:"name"`
+	PasswordHash    string     `gorm:"size:255" json:"-"`                                   // Hidden from JSON
+	OAuthProvider   string     `gorm:"column:oauth_provider;size:50" json:"oauth_provider"` // github, google, or empty
+	OAuthProviderID string     `gorm:"column:oauth_provider_id;size:255" json:"-"`          // OAuth provider user ID
+	IsEmailVerified bool       `gorm:"default:false" json:"is_email_verified"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+	DeletedAt       *time.Time `json:"deleted_at"`
 }
 
 // BeforeCreate hook to generate UUID
@@ -28,4 +33,3 @@ func (u *User) BeforeCreate(tx *gorm.DB) error {
 func (User) TableName() string {
 	return "users"
 }
-

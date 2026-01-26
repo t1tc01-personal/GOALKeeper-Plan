@@ -10,6 +10,7 @@ type UserRepository interface {
 	Create(user *model.User) error
 	GetByID(id string) (*model.User, error)
 	GetByEmail(email string) (*model.User, error)
+	GetByOAuthProviderID(provider, providerID string) (*model.User, error)
 	Update(user *model.User) error
 	Delete(id string) error
 	List(limit, offset int) ([]*model.User, error)
@@ -44,6 +45,15 @@ func (r *userRepository) GetByID(id string) (*model.User, error) {
 func (r *userRepository) GetByEmail(email string) (*model.User, error) {
 	var user model.User
 	err := r.db.Where("email = ?", email).First(&user).Error
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+func (r *userRepository) GetByOAuthProviderID(provider, providerID string) (*model.User, error) {
+	var user model.User
+	err := r.db.Where("oauth_provider = ? AND oauth_provider_id = ?", provider, providerID).First(&user).Error
 	if err != nil {
 		return nil, err
 	}

@@ -1,12 +1,19 @@
 package api
 
 import (
-	"goalkeeper-plan/config"
-	"goalkeeper-plan/internal/logger"
-	user "goalkeeper-plan/internal/user/app"
+	"fmt"
+	"strings"
 	"time"
 
+	"goalkeeper-plan/config"
+	"goalkeeper-plan/internal/logger"
+	auth "goalkeeper-plan/internal/auth/app"
+	user "goalkeeper-plan/internal/user/app"
+	_ "goalkeeper-plan/docs" // swagger docs
+
 	"github.com/gin-gonic/gin"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
@@ -24,7 +31,7 @@ func NewRouter(db *gorm.DB, configs config.Configurations, logger logger.Logger)
 	router.Use(
 		ginLoggerMiddleware(logger),
 		gin.Recovery(),
-		corsMiddleware(),
+		corsMiddleware(configs),
 	)
 
 	// Health check endpoints
@@ -33,10 +40,14 @@ func NewRouter(db *gorm.DB, configs config.Configurations, logger logger.Logger)
 	router.GET("/ready/readiness", readinessHandler(db, logger))
 	router.GET("/ready/liveliness", livenessHandler(logger))
 
+	// Swagger documentation
+	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+
 	// API v1 routes
 	apiV1 := router.Group("/api/v1")
 	{
 		// Register domain applications
+		auth.NewApplication(db, apiV1, configs, logger)
 		user.NewApplication(db, apiV1, configs, logger)
 	}
 
@@ -75,14 +86,85 @@ func ginLoggerMiddleware(logger logger.Logger) gin.HandlerFunc {
 	}
 }
 
-// corsMiddleware creates a CORS middleware
-func corsMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE, PATCH")
+// corsMiddleware creates a CORS middleware with configurable origins
+func corsMiddleware(configs config.Configurations) gin.HandlerFunc {
+	allowedOrigins := configs.AppConfig.CORS.AllowedOrigins
+	if len(allowedOrigins) == 0 {
+		// Default: allow all in development
+		allowedOrigins = []string{"*"}
+	}
 
+	allowedMethods := configs.AppConfig.CORS.AllowedMethods
+	if len(allowedMethods) == 0 {
+		allowedMethods = []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"}
+	}
+
+	allowedHeaders := configs.AppConfig.CORS.AllowedHeaders
+	if len(allowedHeaders) == 0 {
+		allowedHeaders = []string{
+			"Content-Type", "Content-Length", "Accept-Encoding",
+			"X-CSRF-Token", "Authorization", "accept", "origin",
+			"Cache-Control", "X-Requested-With",
+		}
+	}
+
+	exposedHeaders := configs.AppConfig.CORS.ExposedHeaders
+	allowCredentials := configs.AppConfig.CORS.AllowCredentials
+	maxAge := configs.AppConfig.CORS.MaxAge
+	if maxAge == 0 {
+		maxAge = 86400 // Default 24 hours
+	}
+
+	return func(c *gin.Context) {
+		origin := c.Request.Header.Get("Origin")
+
+		// Check if origin is allowed
+		allowed := false
+		var allowedOrigin string
+
+		if len(allowedOrigins) == 1 && allowedOrigins[0] == "*" {
+			allowed = true
+			allowedOrigin = "*"
+		} else {
+			for _, ao := range allowedOrigins {
+				if origin == ao {
+					allowed = true
+					allowedOrigin = ao
+					break
+				}
+			}
+		}
+
+		if allowed {
+			if allowedOrigin == "*" {
+				c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+			} else {
+				c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
+			}
+		}
+
+		if allowCredentials {
+			c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+		}
+
+		// Set allowed methods
+		methods := strings.Join(allowedMethods, ", ")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", methods)
+
+		// Set allowed headers
+		headers := strings.Join(allowedHeaders, ", ")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", headers)
+
+		// Set exposed headers
+		if len(exposedHeaders) > 0 {
+			exposed := strings.Join(exposedHeaders, ", ")
+			c.Writer.Header().Set("Access-Control-Expose-Headers", exposed)
+		}
+
+		// Set max age for preflight
+		c.Writer.Header().Set("Access-Control-Max-Age", fmt.Sprintf("%d", maxAge))
+
+		// Handle preflight requests
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
 			return

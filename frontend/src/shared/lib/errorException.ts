@@ -26,11 +26,24 @@ class ErrorException {
   }
 
   static fromError(error: Record<string, unknown>): ErrorException {
-    const message = error?.['message'] 
-    console.log('message', message)
+    // Handle backend error format: { success: false, error: { type, code, message } }
+    const errorObj = error?.['error'] as Record<string, unknown> | undefined
+    if (errorObj) {
+      return {
+        code: (errorObj['code'] as string) ?? '500',
+        message: isArray(errorObj['message']) 
+          ? (errorObj['message'] as string[]).join(', ') 
+          : (errorObj['message'] as string) ?? 'An error occurred',
+        data: errorObj['details'],
+        type: errorObj['type'] as ErrorCodes,
+      }
+    }
+    
+    // Fallback to old format
+    const message = error?.['message']
     return {
-      code: error?.['status'] as string ?? 500,
-      message: isArray(message) ? message.join(', ') : message as string,
+      code: (error?.['status'] as string) ?? (error?.['code'] as string) ?? '500',
+      message: isArray(message) ? message.join(', ') : (message as string) ?? 'An error occurred',
       data: error?.['data'],
     }
   }

@@ -1,33 +1,34 @@
 'use client'
-import { createContext, useCallback, useContext, useMemo } from 'react'
-import { clearAuthCookie } from '../lib/authCookie'
-import ENV_CONFIG from '@/config/env'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { useAuthStore } from '@/features/auth/store/authStore'
+import { authApi } from '@/features/auth/api/authApi'
+import { clearAuthCookieClient } from '../lib/authCookieClient'
 import { EMPLOYEE_ROLE, RoleEmployee } from '../constant/permission'
+import { toast } from 'sonner'
 
 interface User {
   id: string
   email: string
   name: string
-  roles: string[]
+  roles?: string[]
 }
 
 const AuthContext = createContext<{
   isAuthenticated: boolean
   handleLogout: () => Promise<void>
-  handleLogin: () => Promise<void>
   user: User | null
   role: RoleEmployee
   isLoading: boolean
 }>({
   isAuthenticated: false,
   handleLogout: async () => {},
-  handleLogin: async () => {},
   user: null,
   role: EMPLOYEE_ROLE.NULL,
   isLoading: false,
 })
 
-function getRole(roles: string[]): RoleEmployee {
+function getRole(roles?: string[]): RoleEmployee {
+  if (!roles) return EMPLOYEE_ROLE.EMPLOYEE
   if (roles.includes('admin')) {
     return EMPLOYEE_ROLE.ADMIN
   }
@@ -37,49 +38,49 @@ function getRole(roles: string[]): RoleEmployee {
   return EMPLOYEE_ROLE.EMPLOYEE
 }
 
-function AuthProvider({ children, isAuthenticated }: { children: React.ReactNode; isAuthenticated: boolean }) {
-  const handleLogout = useCallback(async () => {
-    fetch(`${ENV_CONFIG.API_BASE_URL}/auth/logout`, {
-      method: 'POST',
-      credentials: 'include',
-    })
-      .then(async response => {
-        if (response.ok) {
-          await clearAuthCookie()
-          window.location.reload()
-        }
-      })
-      .catch(async error => {
-        await clearAuthCookie()
-        window.location.reload()
-        console.error('Logout error:', error)
-      })
-  }, [])
+function AuthProvider({ children }: { children: React.ReactNode }) {
+  const { user, accessToken, isAuthenticated, clearAuth } = useAuthStore()
+  const [isLoading, setIsLoading] = useState(false)
 
-  const handleLogin = useCallback(async () => {
+  // Sync tokens to cookies on mount and when tokens change
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    
+    if (accessToken) {
+      const { accessToken: token, refreshToken } = useAuthStore.getState()
+      if (token) {
+        // Set access token cookie (24 hours)
+        document.cookie = `accessToken=${token}; path=/; max-age=${24 * 60 * 60}; SameSite=Lax`
+      }
+      if (refreshToken) {
+        // Set refresh token cookie (7 days)
+        document.cookie = `refreshToken=${refreshToken}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax; HttpOnly`
+      }
+    }
+  }, [accessToken])
+
+  const handleLogout = useCallback(async () => {
+    setIsLoading(true)
     try {
-      const response = await fetch(`${ENV_CONFIG.API_BASE_URL}/auth/login`, {
-        method: 'GET',
-      })
-      const data = await response.json()
-      if (data.data) {
-        window.location.href = data.data
-      } else {
-        throw new Error('Login failed')
+      const { refreshToken } = useAuthStore.getState()
+      if (refreshToken) {
+        await authApi.logout({ refresh_token: refreshToken })
       }
     } catch (error) {
-      console.error('Login error:', error)
+      console.error('Logout error:', error)
+    } finally {
+      clearAuthCookieClient()
+      clearAuth()
+      toast.success('Logged out successfully')
+      window.location.href = '/login'
     }
-  }, [])
+  }, [clearAuth])
 
-  const role = useMemo(() => {
-    // TODO: Get user roles from API
-    return EMPLOYEE_ROLE.EMPLOYEE
-  }, [])
+  const role = useMemo(() => getRole(user?.roles), [user?.roles])
 
   return (
     <AuthContext.Provider
-      value={{ isAuthenticated, handleLogout, handleLogin, user: null, role, isLoading: false }}
+      value={{ isAuthenticated, handleLogout, user, role, isLoading }}
     >
       {children}
     </AuthContext.Provider>
