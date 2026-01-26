@@ -92,9 +92,8 @@ func checkPassword(password, hash string) bool {
 }
 
 func (s *authService) SignUp(req *dto.SignUpRequest) (*dto.AuthResponse, error) {
-	// Check if user already exists
-	existingUser, _ := s.userRepository.GetByEmail(req.Email)
-	if existingUser != nil {
+	isUserExists, _ := s.userRepository.CheckEmailExists(req.Email)
+	if isUserExists {
 		return nil, ErrUserExists
 	}
 

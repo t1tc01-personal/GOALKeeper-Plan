@@ -3,6 +3,9 @@ FROM golang:1.22-alpine AS builder
 
 WORKDIR /build
 
+# Set GOPROXY to enable module downloads
+ENV GOPROXY=https://proxy.golang.org,direct
+
 # Install build dependencies
 RUN apk add --no-cache git
 

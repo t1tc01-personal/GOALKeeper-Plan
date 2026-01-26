@@ -15,6 +15,7 @@ type UserRepository interface {
 	Delete(id string) error
 	List(limit, offset int) ([]*model.User, error)
 	WithTrx(tx *gorm.DB) UserRepository
+	CheckEmailExists(email string) (bool, error)
 }
 
 type userRepository struct {
@@ -74,3 +75,8 @@ func (r *userRepository) List(limit, offset int) ([]*model.User, error) {
 	return users, err
 }
 
+func (r *userRepository) CheckEmailExists(email string) (bool, error) {
+	var count int64
+	err := r.db.Model(&model.User{}).Where("email = ?", email).Count(&count).Error
+	return count > 0, err
+}
