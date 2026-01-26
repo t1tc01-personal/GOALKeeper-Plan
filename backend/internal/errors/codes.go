@@ -44,3 +44,26 @@ const (
 	CodeEmailAlreadyExists    = "EMAIL_ALREADY_EXISTS"
 	CodeOAuthEmailExists      = "OAUTH_EMAIL_EXISTS"
 )
+
+// RBAC error codes
+const (
+	CodeRoleNotFound              = "ROLE_NOT_FOUND"
+	CodeRoleExists               = "ROLE_EXISTS"
+	CodeFailedToCreateRole       = "FAILED_TO_CREATE_ROLE"
+	CodeFailedToUpdateRole       = "FAILED_TO_UPDATE_ROLE"
+	CodeFailedToDeleteRole       = "FAILED_TO_DELETE_ROLE"
+	CodeFailedToGetRole          = "FAILED_TO_GET_ROLE"
+	CodeFailedToListRoles        = "FAILED_TO_LIST_ROLES"
+	CodeSystemRoleCannotDelete   = "SYSTEM_ROLE_CANNOT_DELETE"
+	CodeFailedToAssignPermission = "FAILED_TO_ASSIGN_PERMISSION"
+	CodeFailedToRemovePermission = "FAILED_TO_REMOVE_PERMISSION"
+
+	CodePermissionNotFound           = "PERMISSION_NOT_FOUND"
+	CodePermissionExists             = "PERMISSION_EXISTS"
+	CodeFailedToCreatePermission     = "FAILED_TO_CREATE_PERMISSION"
+	CodeFailedToUpdatePermission     = "FAILED_TO_UPDATE_PERMISSION"
+	CodeFailedToDeletePermission    = "FAILED_TO_DELETE_PERMISSION"
+	CodeFailedToGetPermission       = "FAILED_TO_GET_PERMISSION"
+	CodeFailedToListPermissions      = "FAILED_TO_LIST_PERMISSIONS"
+	CodeSystemPermissionCannotDelete = "SYSTEM_PERMISSION_CANNOT_DELETE"
+)

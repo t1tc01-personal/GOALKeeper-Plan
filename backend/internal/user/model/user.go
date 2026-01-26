@@ -3,6 +3,8 @@ package model
 import (
 	"time"
 
+	rbacModel "goalkeeper-plan/internal/rbac/model"
+
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -19,6 +21,9 @@ type User struct {
 	CreatedAt       time.Time  `json:"created_at"`
 	UpdatedAt       time.Time  `json:"updated_at"`
 	DeletedAt       *time.Time `json:"deleted_at"`
+
+	// RBAC relationships
+	Roles []rbacModel.Role `gorm:"many2many:user_roles;" json:"roles,omitempty"`
 }
 
 // BeforeCreate hook to generate UUID
