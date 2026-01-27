@@ -1,6 +1,6 @@
-/.cursor
-/.specify
-/specs
+# /.cursor
+# /.specify
+# /specs
 
 # Binaries for programs and plugins
 *.exe
