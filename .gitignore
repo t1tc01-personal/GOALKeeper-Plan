@@ -1,8 +1,8 @@
-/.cursor
-/.specify
-/specs/*
-/specs
-/.github
+# /.cursor
+# /.specify
+# /specs/*
+# /specs
+# /.github
 
 # Binaries for programs and plugins
 *.exe
