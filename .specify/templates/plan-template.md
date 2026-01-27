@@ -31,16 +31,7 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-The implementation plan MUST demonstrate alignment with the GOALKeeper Plan constitution:
-- **Code Quality**: Describe how linting, formatting, and code review will be enforced for this feature.
-- **Testing Discipline**: Outline the automated test strategy for each user story, including required
-  tests for P1 and high-risk flows.
-- **User Experience Consistency**: Note which design system components, patterns, and accessibility
-  expectations apply to this feature.
-- **Performance & Reliability**: Record expected performance budgets and reliability needs, and how
-  they will be validated (tests, benchmarks, or observability).
-- **Simplicity & Maintainability**: Call out any non-trivial abstractions or dependencies and justify
-  why they are needed over a simpler alternative.
+[Gates determined based on constitution file]
 
 ## Project Structure
 

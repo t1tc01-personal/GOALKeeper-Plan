@@ -23,11 +23,11 @@
 
 **Purpose**: Project initialization and basic structure
 
-- [ ] T001 Create backend and frontend project structure per implementation plan (`backend/`, `frontend/`)
-- [ ] T002 Initialize backend project with chosen Go web framework and dependencies in `backend/`
-- [ ] T003 Initialize frontend project with chosen TypeScript framework and tooling in `frontend/`
-- [ ] T004 [P] Configure backend linting and formatting (e.g., golangci-lint) in `backend/`
-- [ ] T005 [P] Configure frontend linting and formatting (ESLint + Prettier) in `frontend/`
+- [x] T001 Create backend and frontend project structure per implementation plan (`backend/`, `frontend/`)
+- [x] T002 Initialize backend project with chosen Go web framework and dependencies in `backend/`
+- [x] T003 Initialize frontend project with chosen TypeScript framework and tooling in `frontend/`
+- [x] T004 [P] Configure backend linting and formatting (e.g., golangci-lint) in `backend/`
+- [x] T005 [P] Configure frontend linting and formatting (ESLint + Prettier) in `frontend/`
 
 ---
 
@@ -37,13 +37,13 @@
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T006 Setup database connection and migration framework for PostgreSQL in `backend/src/`
-- [ ] T007 [P] Define core domain models (Workspace, Page, Block, SharePermission) in `backend/src/models/`
-- [ ] T008 [P] Implement basic error handling and logging middleware in `backend/src/api/`
-- [ ] T009 [P] Setup API routing structure for workspace, pages, blocks, and sharing in `backend/src/api/`
-- [ ] T010 Configure environment-based settings (database URL, ports, feature flags) in `backend/src/`
-- [ ] T011 Setup frontend routing and base layout (workspace shell + page view) in `frontend/src/pages/`
-- [ ] T012 [P] Implement shared UI components scaffold (sidebar, page shell, block list) in `frontend/src/components/`
+- [x] T006 Setup database connection and migration framework for PostgreSQL in `backend/src/`
+- [x] T007 [P] Define core domain models (Workspace, Page, Block, SharePermission) in `backend/src/models/`
+- [x] T008 [P] Implement basic error handling and logging middleware in `backend/src/api/`
+- [x] T009 [P] Setup API routing structure for workspace, pages, blocks, and sharing in `backend/src/api/`
+- [x] T010 Configure environment-based settings (database URL, ports, feature flags) in `backend/src/`
+- [x] T011 Setup frontend routing and base layout (workspace shell + page view) in `frontend/src/pages/`
+- [x] T012 [P] Implement shared UI components scaffold (sidebar, page shell, block list) in `frontend/src/components/`
 
 **Checkpoint**: Foundation ready - user story implementation can now begin in parallel
 
@@ -59,20 +59,20 @@
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T013 [P] [US1] Backend integration test for workspace and page CRUD in `backend/tests/integration/workspace_page_crud_test.go`
-- [ ] T014 [P] [US1] Backend contract test for workspace/page API in `backend/tests/contract/workspace_page_api_test.go`
-- [ ] T015 [P] [US1] Frontend integration test for creating and organizing pages in `frontend/tests/integration/workspace_page_flow.test.tsx`
+- [x] T013 [P] [US1] Backend integration test for workspace and page CRUD in `backend/tests/integration/workspace_page_crud_test.go`
+- [x] T014 [P] [US1] Backend contract test for workspace/page API in `backend/tests/contract/workspace_page_api_test.go`
+- [x] T015 [P] [US1] Frontend integration test for creating and organizing pages in `frontend/tests/integration/workspace_page_flow.test.tsx`
 
 ### Implementation for User Story 1
 
-- [ ] T016 [P] [US1] Implement workspace and page models/repositories in `backend/src/models/workspace_page.go`
-- [ ] T017 [US1] Implement workspace and page services (create, rename, delete, reorder, nesting) in `backend/src/services/workspace_page_service.go`
-- [ ] T018 [US1] Implement workspace and page HTTP handlers in `backend/src/api/workspace_page_handlers.go`
-- [ ] T019 [P] [US1] Implement sidebar workspace navigation (list, create, reorder, nesting) in `frontend/src/components/WorkspaceSidebar.tsx`
-- [ ] T020 [P] [US1] Implement page shell view (title editing, basic content placeholder) in `frontend/src/pages/WorkspacePageView.tsx`
-- [ ] T021 [US1] Wire frontend workspace/page views to backend APIs using a client in `frontend/src/services/workspaceApi.ts`
-- [ ] T022 [US1] Add validation and UX feedback for page create/rename/delete errors in `frontend/src/components/WorkspaceSidebar.tsx`
-- [ ] T023 [US1] Add logging for workspace/page operations in `backend/src/services/workspace_page_service.go`
+- [x] T016 [P] [US1] Implement workspace and page models/repositories in `backend/src/models/workspace_page.go`
+- [x] T017 [US1] Implement workspace and page services (create, rename, delete, reorder, nesting) in `backend/src/services/workspace_page_service.go`
+- [x] T018 [US1] Implement workspace and page HTTP handlers in `backend/src/api/workspace_page_handlers.go`
+- [x] T019 [P] [US1] Implement sidebar workspace navigation (list, create, reorder, nesting) in `frontend/src/components/WorkspaceSidebar.tsx`
+- [x] T020 [P] [US1] Implement page shell view (title editing, basic content placeholder) in `frontend/src/pages/WorkspacePageView.tsx`
+- [x] T021 [US1] Wire frontend workspace/page views to backend APIs using a client in `frontend/src/services/workspaceApi.ts`
+- [x] T022 [US1] Add validation and UX feedback for page create/rename/delete errors in `frontend/src/components/WorkspaceSidebar.tsx`
+- [x] T023 [US1] Add logging for workspace/page operations in `backend/src/services/workspace_page_service.go`
 
 **Checkpoint**: User Story 1 fully functional and testable independently
 
@@ -84,25 +84,25 @@
 
 **Independent Test**: For an existing page, a user can add, edit, reorder, and delete blocks of different types, see the correct formatting, and have all changes persist.
 
-### Tests for User Story 2 ⚠️
+### Tests for User Story 2 ✅
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T024 [P] [US2] Backend contract test for block CRUD API in `backend/tests/contract/block_api_test.go`
-- [ ] T025 [P] [US2] Backend integration test for block ordering and persistence, including last-write-wins behavior, in `backend/tests/integration/block_flow_test.go`
-- [ ] T026 [P] [US2] Frontend integration test for block editing and reordering in `frontend/tests/integration/block_editor_flow.test.tsx`
-- [ ] T050 [P] [US2] Frontend integration test verifying concurrent edits apply last-write-wins at block level with user feedback in `frontend/tests/integration/concurrent_edits_ui.test.tsx`
+- [X] T024 [P] [US2] Backend contract test for block CRUD API in `backend/tests/contract/block_api_test.go`
+- [X] T025 [P] [US2] Backend integration test for block ordering and persistence, including last-write-wins behavior, in `backend/tests/integration/block_flow_test.go`
+- [X] T026 [P] [US2] Frontend integration test for block editing and reordering in `frontend/tests/integration/block_editor_flow.test.tsx`
+- [X] T050 [P] [US2] Frontend integration test verifying concurrent edits apply last-write-wins at block level with user feedback in `frontend/tests/integration/concurrent_edits_ui.test.tsx`
 
-### Implementation for User Story 2
+### Implementation for User Story 2 ✅
 
-- [ ] T027 [P] [US2] Implement Block model/repository methods (CRUD, ordering) in `backend/src/models/block.go`
-- [ ] T028 [US2] Implement block services (create, update, delete, reorder, type-specific behavior) in `backend/src/services/block_service.go`
-- [ ] T029 [US2] Implement block HTTP handlers in `backend/src/api/block_handlers.go`
-- [ ] T030 [P] [US2] Implement block editor UI components (paragraph, heading, checklist) in `frontend/src/components/BlockEditor.tsx`
-- [ ] T031 [P] [US2] Implement drag-and-drop or other reordering UX for blocks in `frontend/src/components/BlockList.tsx`
-- [ ] T032 [US2] Wire block editor to backend APIs via `frontend/src/services/blockApi.ts`
-- [ ] T033 [US2] Add UX feedback for block-level errors (failed save, validation) in `frontend/src/components/BlockEditor.tsx`
-- [ ] T051 [US2] Implement last-write-wins conflict handling and overwrite notification for blocks in `frontend/src/components/BlockEditor.tsx`
+- [X] T027 [P] [US2] Implement Block model/repository methods (CRUD, ordering) in `backend/src/models/block.go`
+- [X] T028 [US2] Implement block services (create, update, delete, reorder, type-specific behavior) in `backend/src/services/block_service.go`
+- [X] T029 [US2] Implement block HTTP handlers in `backend/src/api/block_handlers.go`
+- [X] T030 [P] [US2] Implement block editor UI components (paragraph, heading, checklist) in `frontend/src/components/BlockEditor.tsx`
+- [X] T031 [P] [US2] Implement drag-and-drop or other reordering UX for blocks in `frontend/src/components/BlockList.tsx`
+- [X] T032 [US2] Wire block editor to backend APIs via `frontend/src/services/blockApi.ts`
+- [X] T033 [US2] Add UX feedback for block-level errors (failed save, validation) in `frontend/src/components/BlockEditor.tsx`
+- [X] T051 [US2] Implement last-write-wins conflict handling and overwrite notification for blocks in `frontend/src/components/BlockEditor.tsx`
 
 **Checkpoint**: User Stories 1 AND 2 both work independently
 
@@ -118,19 +118,19 @@
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T034 [P] [US3] Backend contract test for sharing and permissions API in `backend/tests/contract/sharing_api_test.go`
-- [ ] T035 [P] [US3] Backend integration test for permission enforcement (view vs edit) in `backend/tests/integration/sharing_permissions_flow_test.go`
-- [ ] T036 [P] [US3] Frontend integration test for share UI and permission behavior in `frontend/tests/integration/sharing_flow.test.tsx`
+- [X] T034 [P] [US3] Backend contract test for sharing and permissions API in `backend/tests/contract/sharing_api_test.go`
+- [X] T035 [P] [US3] Backend integration test for permission enforcement (view vs edit) in `backend/tests/integration/sharing_permissions_flow_test.go`
+- [X] T036 [P] [US3] Frontend integration test for share UI and permission behavior in `frontend/tests/integration/sharing_flow.test.tsx`
 
 ### Implementation for User Story 3
 
-- [ ] T037 [P] [US3] Implement SharePermission model/repository methods in `backend/src/models/share_permission.go`
-- [ ] T038 [US3] Implement sharing/permissions services (grant/revoke, role checks) in `backend/src/services/sharing_service.go`
-- [ ] T039 [US3] Implement sharing HTTP handlers (create/revoke shares, list collaborators) in `backend/src/api/sharing_handlers.go`
-- [ ] T040 [P] [US3] Implement share dialog UI (select user, choose role) in `frontend/src/components/ShareDialog.tsx`
-- [ ] T041 [P] [US3] Integrate share entry points into page UI (e.g., share button) in `frontend/src/pages/WorkspacePageView.tsx`
-- [ ] T042 [US3] Enforce view vs edit permissions in frontend (disable editing for viewers) in `frontend/src/components/BlockEditor.tsx`
-- [ ] T043 [US3] Enforce permissions in backend services/handlers and return appropriate errors in `backend/src/services/sharing_service.go`
+- [X] T037 [P] [US3] Implement SharePermission model/repository methods in `backend/src/models/share_permission.go`
+- [X] T038 [US3] Implement sharing/permissions services (grant/revoke, role checks) in `backend/src/services/sharing_service.go`
+- [X] T039 [US3] Implement sharing HTTP handlers (create/revoke shares, list collaborators) in `backend/src/api/sharing_handlers.go`
+- [X] T040 [P] [US3] Implement share dialog UI (select user, choose role) in `frontend/src/components/ShareDialog.tsx`
+- [X] T041 [P] [US3] Integrate share entry points into page UI (e.g., share button) in `frontend/src/pages/WorkspacePageView.tsx`
+- [X] T042 [US3] Enforce view vs edit permissions in frontend (disable editing for viewers) in `frontend/src/shared/PermissionGuard.tsx`
+- [X] T043 [US3] Enforce permissions in backend services/handlers and return appropriate errors in `backend/internal/workspace/middleware/permission_middleware.go`
 
 **Checkpoint**: All user stories are independently functional with correct permission enforcement
 
@@ -140,13 +140,13 @@
 
 **Purpose**: Improvements that affect multiple user stories
 
-- [ ] T044 [P] Documentation updates for Notion-like workspace feature in `specs/001-notion-like-app/`
-- [ ] T045 Code cleanup and refactoring across backend and frontend to improve readability and reuse
-- [ ] T046 Performance optimization for large pages and high-traffic scenarios to meet SC-002 and SC-004 in `backend/src/` and `frontend/src/`
-- [ ] T047 [P] Additional unit tests for critical services (workspace, blocks, sharing) in `backend/tests/unit/`
-- [ ] T048 Security hardening for authorization checks and data exposure in `backend/src/` to support SC-004 and overall reliability targets
-- [ ] T049 Run quickstart validation flow and fix any observed UX or reliability issues to validate SC-001 and SC-003 as described in `specs/001-notion-like-app/quickstart.md`
-- [ ] T052 [P] Implement accessibility improvements (keyboard navigation, ARIA labels, contrast) for workspace sidebar and page views in `frontend/src/components/` and `frontend/src/pages/`
+- [x] T044 [P] Documentation updates for Notion-like workspace feature in `specs/001-notion-like-app/`
+- [x] T045 Code cleanup and refactoring across backend and frontend to improve readability and reuse
+- [x] T046 Performance optimization for large pages and high-traffic scenarios to meet SC-002 and SC-004 in `backend/src/` and `frontend/src/`
+- [x] T047 [P] Additional unit tests for critical services (workspace, blocks, sharing) in `backend/tests/unit/`
+- [x] T048 Security hardening for authorization checks and data exposure in `backend/src/` to support SC-004 and overall reliability targets
+- [x] T049 Run quickstart validation flow and fix any observed UX or reliability issues to validate SC-001 and SC-003 as described in `specs/001-notion-like-app/quickstart.md`
+- [x] T052 [P] Implement accessibility improvements (keyboard navigation, ARIA labels, contrast) for workspace sidebar and page views in `frontend/src/components/` and `frontend/src/pages/`
 - [ ] T053 [P] Implement accessibility improvements and basic a11y checks for block editor interactions in `frontend/src/components/BlockEditor.tsx`
 - [ ] T054 [P] Add backend metrics collection for page load latency, error rates, and permission failures in `backend/src/` and expose them to monitoring
 

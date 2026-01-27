@@ -109,7 +109,7 @@
 
 ### Measurable Outcomes
 
-- **SC-001**: [UX metric, e.g., "Users can complete the primary flow in under 2 minutes with no more than 1 error"]
-- **SC-002**: [Performance metric, e.g., "System handles 1000 concurrent users with p95 latency under 300ms"]
-- **SC-003**: [User satisfaction or accessibility metric, e.g., "90% of users successfully complete primary task on first attempt" or "All primary flows are keyboard-accessible"]
-- **SC-004**: [Business or reliability metric, e.g., "Reduce support tickets related to [X] by 50%" or "Error rate for core API remains below 0.1% over 30 days"]
+- **SC-001**: [Measurable metric, e.g., "Users can complete account creation in under 2 minutes"]
+- **SC-002**: [Measurable metric, e.g., "System handles 1000 concurrent users without degradation"]
+- **SC-003**: [User satisfaction metric, e.g., "90% of users successfully complete primary task on first attempt"]
+- **SC-004**: [Business metric, e.g., "Reduce support tickets related to [X] by 50%"]

@@ -1,0 +1,56 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Documentation
+docs/
+*.md
+README.md
+
+# Tests
+tests/
+*_test.go
+*.test
+coverage/
+
+# Build artifacts
+dist/
+build/
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Node.js (frontend dependencies)
+node_modules/
+npm-debug.log
+yarn-error.log
+pnpm-lock.yaml
+
+# Go artifacts
+vendor/
+*.out
+
+# Environment files (secrets)
+.env
+.env.*
+
+# IDE/Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+.cursor
+.specify
+
+# Docker
+Dockerfile
+docker-compose.yaml
+.dockerignore

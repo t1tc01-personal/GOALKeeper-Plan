@@ -6,10 +6,11 @@ import (
 	"time"
 
 	"goalkeeper-plan/config"
-	"goalkeeper-plan/internal/logger"
 	auth "goalkeeper-plan/internal/auth/app"
+	"goalkeeper-plan/internal/logger"
 	rbac "goalkeeper-plan/internal/rbac/app"
 	user "goalkeeper-plan/internal/user/app"
+	workspace "goalkeeper-plan/internal/workspace/app"
 	_ "goalkeeper-plan/docs" // swagger docs
 
 	"github.com/gin-gonic/gin"
@@ -51,6 +52,7 @@ func NewRouter(db *gorm.DB, configs config.Configurations, logger logger.Logger)
 		auth.NewApplication(db, apiV1, configs, logger)
 		user.NewApplication(db, apiV1, configs, logger)
 		rbac.NewRBACApplication(db, apiV1, configs, logger)
+		workspace.NewApplication(db, apiV1, configs, logger)
 	}
 
 	return router

@@ -16,9 +16,9 @@ export default function OAuthCallbackPage() {
   const [isLoading, setIsLoading] = useState(true)
   const { setAuth } = useAuthStore()
 
-  const provider = params.provider as string
-  const tokenId = searchParams.get('token_id')
-  const error = searchParams.get('error')
+  const provider = (params?.provider as string) || ''
+  const tokenId = searchParams?.get('token_id') || null
+  const error = searchParams?.get('error') || null
 
   useEffect(() => {
     const handleCallback = async () => {
