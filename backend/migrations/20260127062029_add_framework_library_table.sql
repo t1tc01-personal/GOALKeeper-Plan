@@ -10,9 +10,8 @@ CREATE TABLE IF NOT EXISTS framework_library (
 -- Script to initialize sample data for the framework_library table
 -- Assumes the table structure: id (uuid/varchar), name (varchar), config_template (jsonb)
 
-INSERT INTO framework_library (id, name, config_template) VALUES
+INSERT INTO framework_library (name, config_template) VALUES
 (
-  'template-kanban', 
   'Kanban Board', 
   '{
     "framework_type": "kanban",
@@ -26,7 +25,6 @@ INSERT INTO framework_library (id, name, config_template) VALUES
   }'::jsonb
 ),
 (
-  'template-gantt', 
   'Gantt Chart', 
   '{
     "framework_type": "gantt",
@@ -40,7 +38,6 @@ INSERT INTO framework_library (id, name, config_template) VALUES
   }'::jsonb
 ),
 (
-  'template-habit', 
   'Habit Tracker', 
   '{
     "framework_type": "habit_tracker",
@@ -58,7 +55,6 @@ INSERT INTO framework_library (id, name, config_template) VALUES
   }'::jsonb
 ),
 (
-  'template-wbs', 
   'Work Breakdown Structure', 
   '{
     "framework_type": "wbs",
@@ -72,7 +68,6 @@ INSERT INTO framework_library (id, name, config_template) VALUES
   }'::jsonb
 ),
 (
-  'template-action', 
   'Action Plan', 
   '{
     "framework_type": "action_plan",
@@ -86,7 +81,6 @@ INSERT INTO framework_library (id, name, config_template) VALUES
   }'::jsonb
 ),
 (
-  'template-roadmap', 
   'Learning Roadmap', 
   '{
     "framework_type": "learning_roadmap",
