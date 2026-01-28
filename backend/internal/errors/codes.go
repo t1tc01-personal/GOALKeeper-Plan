@@ -3,10 +3,11 @@ package errors
 // Common error codes
 const (
 	// Validation
-	CodeInvalidInput  = "INVALID_INPUT"
-	CodeMissingField  = "MISSING_FIELD"
-	CodeInvalidFormat = "INVALID_FORMAT"
-	CodeInvalidID     = "INVALID_ID"
+	CodeInvalidInput    = "INVALID_INPUT"
+	CodeMissingField    = "MISSING_FIELD"
+	CodeMissingRequired = "MISSING_REQUIRED"
+	CodeInvalidFormat   = "INVALID_FORMAT"
+	CodeInvalidID       = "INVALID_ID"
 
 	// Internal
 	CodeInternalError = "INTERNAL_ERROR"
@@ -22,6 +23,37 @@ const (
 	CodeFailedToDeleteUser = "FAILED_TO_DELETE_USER"
 	CodeFailedToGetUser    = "FAILED_TO_GET_USER"
 	CodeFailedToListUsers  = "FAILED_TO_LIST_USERS"
+)
+
+// Workspace error codes
+const (
+	CodeWorkspaceNotFound       = "WORKSPACE_NOT_FOUND"
+	CodeFailedToCreateWorkspace = "FAILED_TO_CREATE_WORKSPACE"
+	CodeFailedToUpdateWorkspace = "FAILED_TO_UPDATE_WORKSPACE"
+	CodeFailedToDeleteWorkspace = "FAILED_TO_DELETE_WORKSPACE"
+	CodeFailedToFetchWorkspaces = "FAILED_TO_FETCH_WORKSPACES"
+	CodeFailedToListWorkspaces  = "FAILED_TO_LIST_WORKSPACES"
+)
+
+// Block error codes
+const (
+	CodeBlockNotFound         = "BLOCK_NOT_FOUND"
+	CodeFailedToCreateBlock   = "FAILED_TO_CREATE_BLOCK"
+	CodeFailedToUpdateBlock   = "FAILED_TO_UPDATE_BLOCK"
+	CodeFailedToDeleteBlock   = "FAILED_TO_DELETE_BLOCK"
+	CodeFailedToFetchBlocks   = "FAILED_TO_FETCH_BLOCKS"
+	CodeFailedToListBlocks    = "FAILED_TO_LIST_BLOCKS"
+	CodeFailedToReorderBlocks = "FAILED_TO_REORDER_BLOCKS"
+)
+
+// Page error codes
+const (
+	CodePageNotFound           = "PAGE_NOT_FOUND"
+	CodeFailedToCreatePage     = "FAILED_TO_CREATE_PAGE"
+	CodeFailedToUpdatePage     = "FAILED_TO_UPDATE_PAGE"
+	CodeFailedToDeletePage     = "FAILED_TO_DELETE_PAGE"
+	CodeFailedToFetchPages     = "FAILED_TO_FETCH_PAGES"
+	CodeFailedToFetchHierarchy = "FAILED_TO_FETCH_HIERARCHY"
 )
 
 // Auth error codes
@@ -47,7 +79,7 @@ const (
 
 // RBAC error codes
 const (
-	CodeRoleNotFound              = "ROLE_NOT_FOUND"
+	CodeRoleNotFound             = "ROLE_NOT_FOUND"
 	CodeRoleExists               = "ROLE_EXISTS"
 	CodeFailedToCreateRole       = "FAILED_TO_CREATE_ROLE"
 	CodeFailedToUpdateRole       = "FAILED_TO_UPDATE_ROLE"
@@ -62,8 +94,8 @@ const (
 	CodePermissionExists             = "PERMISSION_EXISTS"
 	CodeFailedToCreatePermission     = "FAILED_TO_CREATE_PERMISSION"
 	CodeFailedToUpdatePermission     = "FAILED_TO_UPDATE_PERMISSION"
-	CodeFailedToDeletePermission    = "FAILED_TO_DELETE_PERMISSION"
-	CodeFailedToGetPermission       = "FAILED_TO_GET_PERMISSION"
+	CodeFailedToDeletePermission     = "FAILED_TO_DELETE_PERMISSION"
+	CodeFailedToGetPermission        = "FAILED_TO_GET_PERMISSION"
 	CodeFailedToListPermissions      = "FAILED_TO_LIST_PERMISSIONS"
 	CodeSystemPermissionCannotDelete = "SYSTEM_PERMISSION_CANNOT_DELETE"
 )

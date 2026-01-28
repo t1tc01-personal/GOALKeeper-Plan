@@ -17,11 +17,11 @@ export default function OAuthProviderCallbackPage() {
   const [isLoading, setIsLoading] = useState(true)
   const { setAuth } = useAuthStore()
 
-  const provider = params.provider as 'github' | 'google'
-  const code = searchParams.get('code')
-  const state = searchParams.get('state')
-  const error = searchParams.get('error')
-  const errorDescription = searchParams.get('error_description')
+  const provider = (params?.provider as 'github' | 'google') || 'github'
+  const code = searchParams?.get('code') || null
+  const state = searchParams?.get('state') || null
+  const error = searchParams?.get('error') || null
+  const errorDescription = searchParams?.get('error_description') || null
 
   useEffect(() => {
     const handleCallback = async () => {

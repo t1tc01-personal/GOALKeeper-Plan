@@ -36,7 +36,7 @@ func SuccessResponse(ctx *gin.Context, statusCode int, message string, data inte
 	})
 }
 
-// ErrorResponse sends an error response
+// ErrorResponse sends an error response with an AppError
 func ErrorResponse(ctx *gin.Context, appErr *errors.AppError) {
 	statusCode := appErr.GetHTTPStatusCode()
 
@@ -51,6 +51,15 @@ func ErrorResponse(ctx *gin.Context, appErr *errors.AppError) {
 		Timestamp: appErr.Timestamp.Unix(),
 		RequestID: appErr.RequestID,
 	})
+}
+
+// SimpleErrorResponse sends a simple error response without AppError
+func SimpleErrorResponse(ctx *gin.Context, statusCode int, message string) {
+	ctx.JSON(statusCode, Response{
+		Success:   false,
+		Message:   message,
+		Timestamp: time.Now().Unix(),
+		RequestID: getRequestID(ctx)})
 }
 
 // getRequestID extracts request ID from context (if using request ID middleware)

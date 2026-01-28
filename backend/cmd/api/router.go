@@ -6,13 +6,16 @@ import (
 	"time"
 
 	"goalkeeper-plan/config"
-	"goalkeeper-plan/internal/logger"
 	auth "goalkeeper-plan/internal/auth/app"
+	"goalkeeper-plan/internal/logger"
+	"goalkeeper-plan/internal/metrics"
 	rbac "goalkeeper-plan/internal/rbac/app"
 	user "goalkeeper-plan/internal/user/app"
+	workspace "goalkeeper-plan/internal/workspace/app"
 	_ "goalkeeper-plan/docs" // swagger docs
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 	"go.uber.org/zap"
@@ -28,8 +31,12 @@ func NewRouter(db *gorm.DB, configs config.Configurations, logger logger.Logger)
 
 	router := gin.New()
 
+	// Initialize metrics
+	metricsInstance := metrics.NewMetrics()
+
 	// Global middleware
 	router.Use(
+		metrics.MetricsMiddleware(metricsInstance),
 		ginLoggerMiddleware(logger),
 		gin.Recovery(),
 		corsMiddleware(configs),
@@ -41,6 +48,9 @@ func NewRouter(db *gorm.DB, configs config.Configurations, logger logger.Logger)
 	router.GET("/ready/readiness", readinessHandler(db, logger))
 	router.GET("/ready/liveliness", livenessHandler(logger))
 
+	// Metrics endpoint (Prometheus format)
+	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
+
 	// Swagger documentation
 	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
@@ -51,6 +61,7 @@ func NewRouter(db *gorm.DB, configs config.Configurations, logger logger.Logger)
 		auth.NewApplication(db, apiV1, configs, logger)
 		user.NewApplication(db, apiV1, configs, logger)
 		rbac.NewRBACApplication(db, apiV1, configs, logger)
+		workspace.NewApplication(db, apiV1, configs, logger)
 	}
 
 	return router
@@ -106,7 +117,7 @@ func corsMiddleware(configs config.Configurations) gin.HandlerFunc {
 		allowedHeaders = []string{
 			"Content-Type", "Content-Length", "Accept-Encoding",
 			"X-CSRF-Token", "Authorization", "accept", "origin",
-			"Cache-Control", "X-Requested-With",
+			"Cache-Control", "X-Requested-With", "X-User-ID",
 		}
 	}
 

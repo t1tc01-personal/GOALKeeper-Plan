@@ -4,9 +4,9 @@ import (
 	"goalkeeper-plan/config"
 	"goalkeeper-plan/internal/logger"
 	rbacController "goalkeeper-plan/internal/rbac/controller"
+	rbacRepo "goalkeeper-plan/internal/rbac/repository"
 	rbacRouter "goalkeeper-plan/internal/rbac/router"
 	rbacService "goalkeeper-plan/internal/rbac/service"
-	rbacRepo "goalkeeper-plan/internal/rbac/repository"
 
 	"gorm.io/gorm"
 )
@@ -18,8 +18,8 @@ func NewRBACApplication(db *gorm.DB, baseRouter interface{}, configs config.Conf
 	permissionRepo := rbacRepo.NewPermissionRepository(db)
 
 	// Initialize services
-	roleService := rbacService.NewRoleService(roleRepo, permissionRepo)
-	permissionService := rbacService.NewPermissionService(permissionRepo)
+	roleService := rbacService.NewRoleService(roleRepo, permissionRepo, logger)
+	permissionService := rbacService.NewPermissionService(permissionRepo, logger)
 
 	// Initialize controllers
 	roleController := rbacController.NewRoleController(roleService, permissionService, logger)

@@ -8,6 +8,7 @@ import (
 	"goalkeeper-plan/internal/response"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
 
@@ -54,6 +55,26 @@ func GetQuery(ctx *gin.Context, key string, defaultValue string) string {
 		return defaultValue
 	}
 	return value
+}
+
+// GetUserIDFromContext extracts user ID from request context (set by auth middleware)
+func GetUserIDFromContext(ctx *gin.Context) (uuid.UUID, error) {
+	userIDInterface, exists := ctx.Get("user_id")
+	if !exists {
+		return uuid.UUID{}, errors.New("user_id not found in context")
+	}
+
+	userIDStr, ok := userIDInterface.(string)
+	if !ok {
+		return uuid.UUID{}, errors.New("user_id is not a string")
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return uuid.UUID{}, errors.New("invalid user_id format")
+	}
+
+	return userID, nil
 }
 
 // HandleError processes an error and sends appropriate response

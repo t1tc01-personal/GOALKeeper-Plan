@@ -14,7 +14,7 @@ env "local" {
 
   format {
     migrate {
-      apply = "{{ range .Pending }}{{ printf \"Applied %s\\n\" .Name }}{{ end }}"
+      apply = "{{ range .Pending }}{{ printf \"Applied %s\\n\" .Name }}{{ end }}{{ if .Error }}{{ printf \"Error: %s\\n\" .Error }}{{ end }}"
     }
   }
 }

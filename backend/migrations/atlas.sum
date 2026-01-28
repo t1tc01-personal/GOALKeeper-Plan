@@ -1,4 +1,4 @@
-h1:tSFnVE9x0zDHqaVF3CRrWV2Ap8N1FU3fMKX89quQza4=
+h1:w2Z+s1YDbesZ4HDJbis0EJi5cONHMHskDKnEmITvuyM=
 20260126034751_init_db.sql h1:XeFjFfXk7ZBy4ok9R49XXkp4hVCKNiJcZ5azdSdwq+I=
 20260126180917_rbac_db.sql h1:EzBbs/GIFoZ9oqNrlDfMMNz6sW8/eb7PYG8YnIxQ/30=
 20260127062029_add_framework_library_table.sql h1:tHc22haKjJkbA45Bw4k1yae/NA+j5afPBia+4cCEuyE=
@@ -7,3 +7,6 @@ h1:tSFnVE9x0zDHqaVF3CRrWV2Ap8N1FU3fMKX89quQza4=
 20260127134056_add_blocks_table.sql h1:y1FEl0Q0UtB2aSaCEb4ic/IUCDa/MvgEjkT1tchn7r8=
 20260127134057_add_block_history_table.sql h1:oDPIxX3bwTXuuXq9uupXANGfbRqzx+1WMZg1Btma1vo=
 20260127134058_add_block_deltas_table.sql h1:hwMHx7+kyMvURWtv5ltDWhLcK8y0+L/HBlXBb85XEHg=
+20260127134059_add_owner_to_workspaces.sql h1:sl8xysRTFC4FcBsfwJ5eyTkfoT/hutj+Ae4kcZPHMHk=
+20260127134060_add_performance_indexes.sql h1:qwUUYJYZMzq8FiUqUz0wF2o1yWbpSXXMSNffZNA/JuA=
+20260127134061_add_share_permissions_table.sql h1:Svd2R8fmH2GBE6RpA4DTGXLqn5Qs6S3RfX6XJHFy1UA=

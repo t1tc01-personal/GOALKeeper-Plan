@@ -1,6 +1,8 @@
 /.cursor
 /.specify
+/specs/*
 /specs
+/.github
 
 # Binaries for programs and plugins
 *.exe
@@ -17,5 +19,20 @@
 # Go workspace file
 go.work
 go.work.sum
-# env file
+# env files
 env
+.env
+.env.*
+
+# Node/JS artifacts
+node_modules/
+dist/
+build/
+
+# Editor/IDE
+.vscode/
+.idea/
+
+# OS-specific
+.DS_Store
+Thumbs.db
