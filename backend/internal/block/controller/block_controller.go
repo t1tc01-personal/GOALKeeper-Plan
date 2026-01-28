@@ -21,6 +21,7 @@ type BlockController interface {
 	UpdateBlock(*gin.Context)
 	DeleteBlock(*gin.Context)
 	ReorderBlocks(*gin.Context)
+	BatchSync(*gin.Context)
 }
 
 type blockController struct {
@@ -233,12 +234,9 @@ func (c *blockController) UpdateBlock(ctx *gin.Context) {
 
 	block, err := c.blockService.UpdateBlock(ctx, blockID, content)
 	if err != nil {
+		// Let central error handler map domain errors correctly (e.g. BLOCK_NOT_FOUND -> 404)
 		c.logger.Error("Failed to update block", zap.Error(err), zap.String("block_id", id))
-		api.HandleError(ctx, errors.NewInternalError(
-			errors.CodeFailedToUpdateBlock,
-			blockMessages.MsgFailedToUpdateBlock,
-			err,
-		), c.logger)
+		api.HandleError(ctx, err, c.logger)
 		return
 	}
 
@@ -335,5 +333,22 @@ func (c *blockController) ReorderBlocks(ctx *gin.Context) {
 		}
 
 		return nil, nil
+	})
+}
+
+func (c *blockController) BatchSync(ctx *gin.Context) {
+	api.HandleRequest(ctx, api.HandlerConfig{
+		Logger: c.logger,
+	}, func(ctx *gin.Context, req dto.BatchSyncRequest) (interface{}, error) {
+		response, err := c.blockService.BatchSync(ctx, &req)
+		if err != nil {
+			c.logger.Error("Failed to batch sync blocks", zap.Error(err))
+			return nil, errors.NewInternalError(
+				errors.CodeFailedToUpdateBlock, // Reuse existing error code
+				blockMessages.MsgFailedToSyncBlocks,
+				err,
+			)
+		}
+		return response, nil
 	})
 }

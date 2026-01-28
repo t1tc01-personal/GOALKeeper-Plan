@@ -84,9 +84,30 @@ export async function POST(
       const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET
 
       if (!googleClientId || !googleClientSecret) {
-        console.error('Missing Google OAuth credentials')
+        console.error('Missing Google OAuth credentials', {
+          hasClientId: !!googleClientId,
+          hasClientSecret: !!googleClientSecret,
+        })
         return NextResponse.json(
-          { error: 'Google OAuth credentials not configured' },
+          { 
+            error: 'Google OAuth credentials not configured',
+            details: 'Please set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET environment variables'
+          },
+          { status: 500 }
+        )
+      }
+
+      // Validate credentials format
+      if (googleClientId.length < 10 || googleClientSecret.length < 10) {
+        console.error('Google OAuth credentials appear to be invalid or truncated', {
+          clientIdLength: googleClientId.length,
+          clientSecretLength: googleClientSecret.length,
+        })
+        return NextResponse.json(
+          { 
+            error: 'Google OAuth credentials appear to be invalid',
+            details: 'Please check that GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are correctly set in your .env file. Make sure there are no missing quotes or truncated values.'
+          },
           { status: 500 }
         )
       }
@@ -115,6 +136,13 @@ export async function POST(
       // Remove trailing slash if present
       const cleanBaseUrl = baseUrl.replace(/\/$/, '')
       const redirectUri = `${cleanBaseUrl}/auth/${provider}/callback`
+      
+      console.log('Google OAuth exchange attempt:', {
+        redirectUri,
+        hasClientId: !!googleClientId,
+        hasClientSecret: !!googleClientSecret,
+        clientIdPrefix: googleClientId ? googleClientId.substring(0, 10) + '...' : 'missing',
+      })
       
       const response = await fetch('https://oauth2.googleapis.com/token', {
         method: 'POST',
@@ -148,14 +176,25 @@ export async function POST(
           fullResponse: errorText,
         })
         
-        // Provide more helpful error message
-        const errorMessage = errorData.error_description || errorData.error || `Failed to exchange Google code for token: ${response.statusText}`
+        // Provide more helpful error message based on error type
+        let errorMessage = errorData.error_description || errorData.error || `Failed to exchange Google code for token: ${response.statusText}`
+        let details: string | undefined
+        
+        if (errorData.error === 'invalid_client') {
+          errorMessage = 'Invalid Google OAuth client credentials'
+          details = 'Please verify: 1) GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are correct in your .env file, 2) The OAuth client exists in Google Cloud Console, 3) The credentials match the OAuth client configuration'
+        } else if (errorData.error === 'invalid_request') {
+          details = 'Please check: 1) OAuth consent screen is configured correctly, 2) Test users are added (if in Testing mode), 3) Redirect URI matches exactly in Google Cloud Console. Required redirect URI: ' + redirectUri
+        } else if (errorData.error === 'redirect_uri_mismatch') {
+          errorMessage = 'Redirect URI mismatch'
+          details = `The redirect URI "${redirectUri}" does not match any authorized redirect URIs in Google Cloud Console. Please add this exact URI to your OAuth 2.0 Client ID configuration.`
+        }
+        
         return NextResponse.json(
           { 
             error: errorMessage,
-            details: errorData.error === 'invalid_request' 
-              ? 'Please check: 1) OAuth consent screen is configured correctly, 2) Test users are added (if in Testing mode), 3) Redirect URI matches exactly in Google Cloud Console'
-              : undefined
+            details,
+            redirectUri: redirectUri, // Include redirect URI in response for debugging
           },
           { status: response.status }
         )

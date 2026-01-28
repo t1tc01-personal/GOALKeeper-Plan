@@ -58,7 +58,23 @@ export default function OAuthProviderCallbackPage() {
 
         if (!exchangeResponse.ok) {
           const errorData = await exchangeResponse.json()
-          throw new Error(errorData.error || 'Failed to exchange code for token')
+          const errorMessage = errorData.error || 'Failed to exchange code for token'
+          const errorDetails = errorData.details || errorData.error_description
+          
+          console.error('OAuth exchange failed:', {
+            error: errorMessage,
+            details: errorDetails,
+            redirectUri: errorData.redirectUri,
+          })
+          
+          // Show detailed error to user
+          if (errorDetails) {
+            toast.error(`${errorMessage}: ${errorDetails}`)
+          } else {
+            toast.error(errorMessage)
+          }
+          
+          throw new Error(errorMessage)
         }
 
         const exchangeData = await exchangeResponse.json()

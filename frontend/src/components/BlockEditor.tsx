@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { blockApi, type Block, type UpdateBlockRequest } from '@/services/blockApi';
+import { ChevronRight, ChevronDown, Info, AlertCircle, CheckCircle, XCircle, Lightbulb } from 'lucide-react';
 
 interface BlockEditorProps {
   block: Block;
@@ -32,12 +33,42 @@ export function BlockEditor({
   const [content, setContent] = useState(block.content || '');
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [metadata, setMetadata] = useState<Record<string, any>>(block.metadata || {});
+  
+  // For list types, parse content as items array
+  const [listItems, setListItems] = useState<string[]>(() => {
+    const blockType = block.type_id || block.type || 'text';
+    if (blockType === 'bulleted_list' || blockType === 'numbered_list') {
+      try {
+        const parsed = block.metadata?.items || [];
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return block.content ? block.content.split('\n').filter(Boolean) : [];
+      }
+    }
+    return [];
+  });
   
   // Refs for focus management
   const contentRef = useRef<HTMLTextAreaElement | HTMLInputElement | null>(null);
   const saveButtonRef = useRef<HTMLButtonElement>(null);
   const blockContainerRef = useRef<HTMLDivElement>(null);
-  const contentDisplayRef = useRef<HTMLParagraphElement | HTMLHeadingElement | HTMLLabelElement>(null);
+  const contentDisplayRef = useRef<HTMLParagraphElement | HTMLHeadingElement | HTMLLabelElement | HTMLUListElement | HTMLOListElement | HTMLDivElement>(null);
+
+  // Sync content and metadata when block updates
+  useEffect(() => {
+    setContent(block.content || '');
+    setMetadata(block.metadata || {});
+    const blockType = block.type_id || block.type || 'text';
+    if (blockType === 'bulleted_list' || blockType === 'numbered_list') {
+      try {
+        const parsed = block.metadata?.items || [];
+        setListItems(Array.isArray(parsed) ? parsed : (block.content ? block.content.split('\n').filter(Boolean) : []));
+      } catch {
+        setListItems(block.content ? block.content.split('\n').filter(Boolean) : []);
+      }
+    }
+  }, [block.id, block.content, block.metadata]);
 
   // Auto-focus edit input when entering edit mode
   useEffect(() => {
@@ -136,11 +167,24 @@ export function BlockEditor({
       setError(null);
       announceToScreenReader(`Saving ${blockType}...`);
 
+      const currentBlockType = block.type_id || block.type || 'text';
       const updateReq: UpdateBlockRequest = {
         content: content || undefined,
       };
 
+      // Handle metadata updates for specific block types
+      if (currentBlockType === 'toggle' || currentBlockType === 'callout') {
+        updateReq.blockConfig = metadata;
+      } else if (currentBlockType === 'bulleted_list' || currentBlockType === 'numbered_list') {
+        updateReq.blockConfig = { items: listItems };
+        updateReq.content = listItems.join('\n');
+      }
+
       const updatedBlock = await blockApi.updateBlock(block.id, updateReq);
+      // Update local metadata state if it was changed
+      if (updateReq.blockConfig) {
+        setMetadata(updateReq.blockConfig);
+      }
       onUpdate(updatedBlock);
       setIsEditing(false);
       announceToScreenReader(`${blockType} saved successfully.`);
@@ -191,6 +235,8 @@ export function BlockEditor({
       todo_list: 'Todo list block',
       bulleted_list: 'Bulleted list block',
       numbered_list: 'Numbered list block',
+      toggle: 'Toggle block',
+      callout: 'Callout block',
     }[currentBlockType] || 'Content block';
 
     const blockTypeInstructions = {
@@ -201,6 +247,8 @@ export function BlockEditor({
       todo_list: 'Edit todo item. Press Ctrl+Enter to save, Escape to cancel.',
       bulleted_list: 'Edit bulleted list item. Press Ctrl+Enter to save, Escape to cancel.',
       numbered_list: 'Edit numbered list item. Press Ctrl+Enter to save, Escape to cancel.',
+      toggle: 'Edit toggle block. Press Ctrl+Enter to save, Escape to cancel.',
+      callout: 'Edit callout block. Press Ctrl+Enter to save, Escape to cancel.',
     }[currentBlockType] || 'Edit block content. Press Ctrl+Enter to save, Escape to cancel.';
 
     switch (currentBlockType) {
@@ -307,6 +355,353 @@ export function BlockEditor({
           )
         );
 
+      case 'bulleted_list':
+        return (
+          isEditing ? (
+            <div className="space-y-2">
+              <label htmlFor={`bulleted-list-${block.id}`} className="sr-only">
+                {blockTypeLabel}
+              </label>
+              <div className="space-y-1">
+                {listItems.map((item, index) => (
+                  <div key={index} className="flex items-center gap-2">
+                    <span className="text-gray-400">•</span>
+                    <input
+                      type="text"
+                      value={item}
+                      onChange={e => {
+                        const newItems = [...listItems];
+                        newItems[index] = e.target.value;
+                        setListItems(newItems);
+                      }}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          const newItems = [...listItems, ''];
+                          setListItems(newItems);
+                          setTimeout(() => {
+                            const inputs = e.currentTarget.parentElement?.parentElement?.querySelectorAll('input');
+                            if (inputs && inputs[index + 1]) {
+                              (inputs[index + 1] as HTMLInputElement).focus();
+                            }
+                          }, 0);
+                        } else if (e.key === 'Backspace' && !item && listItems.length > 1) {
+                          e.preventDefault();
+                          const newItems = listItems.filter((_, i) => i !== index);
+                          setListItems(newItems);
+                        } else {
+                          handleKeyDown(e as any);
+                        }
+                      }}
+                      placeholder="List item..."
+                      className={baseClass}
+                      disabled={isSaving}
+                    />
+                    {listItems.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setListItems(listItems.filter((_, i) => i !== index));
+                        }}
+                        className="text-red-500 hover:text-red-700 text-sm"
+                        aria-label="Remove item"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {listItems.length === 0 && (
+                  <input
+                    type="text"
+                    value=""
+                    onChange={e => setListItems([e.target.value])}
+                    onKeyDown={handleKeyDown}
+                    placeholder="List item..."
+                    className={baseClass}
+                    disabled={isSaving}
+                  />
+                )}
+              </div>
+            </div>
+          ) : (
+            <ul
+              ref={contentDisplayRef as any}
+              onClick={() => setIsEditing(true)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setIsEditing(true);
+                }
+              }}
+              role="button"
+              tabIndex={0}
+              className="cursor-pointer hover:bg-gray-100 px-3 py-2 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-0"
+              aria-label={`Bulleted list: ${listItems.length} items`}
+            >
+              {listItems.length > 0 ? (
+                listItems.map((item, index) => (
+                  <li key={index} className="list-disc list-inside">
+                    {item || '(empty)'}
+                  </li>
+                ))
+              ) : (
+                <li className="text-gray-400">Click to add list items...</li>
+              )}
+            </ul>
+          )
+        );
+
+      case 'numbered_list':
+        return (
+          isEditing ? (
+            <div className="space-y-2">
+              <label htmlFor={`numbered-list-${block.id}`} className="sr-only">
+                {blockTypeLabel}
+              </label>
+              <div className="space-y-1">
+                {listItems.map((item, index) => (
+                  <div key={index} className="flex items-center gap-2">
+                    <span className="text-gray-400 w-6 text-right">{index + 1}.</span>
+                    <input
+                      type="text"
+                      value={item}
+                      onChange={e => {
+                        const newItems = [...listItems];
+                        newItems[index] = e.target.value;
+                        setListItems(newItems);
+                      }}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          const newItems = [...listItems, ''];
+                          setListItems(newItems);
+                          setTimeout(() => {
+                            const inputs = e.currentTarget.parentElement?.parentElement?.querySelectorAll('input');
+                            if (inputs && inputs[index + 1]) {
+                              (inputs[index + 1] as HTMLInputElement).focus();
+                            }
+                          }, 0);
+                        } else if (e.key === 'Backspace' && !item && listItems.length > 1) {
+                          e.preventDefault();
+                          const newItems = listItems.filter((_, i) => i !== index);
+                          setListItems(newItems);
+                        } else {
+                          handleKeyDown(e as any);
+                        }
+                      }}
+                      placeholder="List item..."
+                      className={baseClass}
+                      disabled={isSaving}
+                    />
+                    {listItems.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setListItems(listItems.filter((_, i) => i !== index));
+                        }}
+                        className="text-red-500 hover:text-red-700 text-sm"
+                        aria-label="Remove item"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {listItems.length === 0 && (
+                  <input
+                    type="text"
+                    value=""
+                    onChange={e => setListItems([e.target.value])}
+                    onKeyDown={handleKeyDown}
+                    placeholder="List item..."
+                    className={baseClass}
+                    disabled={isSaving}
+                  />
+                )}
+              </div>
+            </div>
+          ) : (
+            <ol
+              ref={contentDisplayRef as any}
+              onClick={() => setIsEditing(true)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setIsEditing(true);
+                }
+              }}
+              role="button"
+              tabIndex={0}
+              className="cursor-pointer hover:bg-gray-100 px-3 py-2 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-0 list-decimal list-inside"
+              aria-label={`Numbered list: ${listItems.length} items`}
+            >
+              {listItems.length > 0 ? (
+                listItems.map((item, index) => (
+                  <li key={index}>
+                    {item || '(empty)'}
+                  </li>
+                ))
+              ) : (
+                <li className="text-gray-400">Click to add list items...</li>
+              )}
+            </ol>
+          )
+        );
+
+      case 'toggle':
+        const isCollapsed = metadata.collapsed === true;
+        const toggleHeader = content.split('\n')[0] || '';
+        const toggleContent = content.split('\n').slice(1).join('\n') || '';
+        const handleToggleCollapse = async () => {
+          const newMetadata = { ...metadata, collapsed: !isCollapsed };
+          setMetadata(newMetadata);
+          try {
+            await blockApi.updateBlock(block.id, { blockConfig: newMetadata });
+            const updatedBlock = await blockApi.getBlock(block.id);
+            onUpdate(updatedBlock);
+          } catch (err) {
+            setError(err instanceof Error ? err.message : 'Failed to toggle');
+            setMetadata(metadata); // Rollback
+          }
+        };
+        return (
+          <div className="border border-gray-200 rounded">
+            <div className="flex items-center gap-2 px-3 py-2">
+              <button
+                onClick={handleToggleCollapse}
+                className="flex-shrink-0 hover:bg-gray-50 rounded p-1 transition-colors"
+                disabled={isSaving}
+                aria-label={isCollapsed ? 'Expand toggle' : 'Collapse toggle'}
+              >
+                {isCollapsed ? (
+                  <ChevronRight className="h-4 w-4 text-gray-500" />
+                ) : (
+                  <ChevronDown className="h-4 w-4 text-gray-500" />
+                )}
+              </button>
+              {isEditing ? (
+                <div className="flex-1 space-y-2">
+                  <input
+                    ref={contentRef as React.Ref<HTMLInputElement>}
+                    type="text"
+                    value={toggleHeader}
+                    onChange={e => setContent(e.target.value + (toggleContent ? '\n' + toggleContent : ''))}
+                    onKeyDown={handleKeyDown}
+                    placeholder="Toggle header..."
+                    className="w-full border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-primary"
+                    disabled={isSaving}
+                  />
+                  {!isCollapsed && (
+                    <textarea
+                      value={toggleContent}
+                      onChange={e => setContent(toggleHeader + '\n' + e.target.value)}
+                      onKeyDown={handleKeyDown}
+                      placeholder="Toggle content..."
+                      className="w-full min-h-[4rem] border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-primary resize-none"
+                      disabled={isSaving}
+                    />
+                  )}
+                </div>
+              ) : (
+                <div
+                  onClick={() => setIsEditing(true)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setIsEditing(true);
+                    }
+                  }}
+                  role="button"
+                  tabIndex={0}
+                  className="flex-1 cursor-pointer"
+                >
+                  <div className="font-medium">
+                    {toggleHeader || 'Click to add toggle header...'}
+                  </div>
+                  {!isCollapsed && toggleContent && (
+                    <div className="mt-1 text-sm text-gray-600">
+                      {toggleContent}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+
+      case 'callout':
+        const calloutIcon = metadata.icon || 'info';
+        const calloutColor = metadata.color || 'blue';
+        const getCalloutIcon = () => {
+          switch (calloutIcon) {
+            case 'info':
+              return <Info className="h-5 w-5" />;
+            case 'warning':
+              return <AlertCircle className="h-5 w-5" />;
+            case 'success':
+              return <CheckCircle className="h-5 w-5" />;
+            case 'error':
+              return <XCircle className="h-5 w-5" />;
+            case 'lightbulb':
+              return <Lightbulb className="h-5 w-5" />;
+            default:
+              return <Info className="h-5 w-5" />;
+          }
+        };
+        const getCalloutColorClasses = () => {
+          switch (calloutColor) {
+            case 'blue':
+              return 'bg-blue-50 border-blue-200 text-blue-900';
+            case 'yellow':
+              return 'bg-yellow-50 border-yellow-200 text-yellow-900';
+            case 'green':
+              return 'bg-green-50 border-green-200 text-green-900';
+            case 'red':
+              return 'bg-red-50 border-red-200 text-red-900';
+            case 'gray':
+              return 'bg-gray-50 border-gray-200 text-gray-900';
+            default:
+              return 'bg-blue-50 border-blue-200 text-blue-900';
+          }
+        };
+        return (
+          <div className={`border rounded p-3 ${getCalloutColorClasses()}`}>
+            <div className="flex items-start gap-2">
+              <div className="mt-0.5 flex-shrink-0">
+                {getCalloutIcon()}
+              </div>
+              {isEditing ? (
+                <textarea
+                  ref={contentRef as React.Ref<HTMLTextAreaElement>}
+                  value={content}
+                  onChange={e => setContent(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Callout content..."
+                  className={`flex-1 min-h-[2rem] border-0 outline-none bg-transparent resize-none ${getCalloutColorClasses().replace('bg-', 'placeholder:').replace('-50', '-300')}`}
+                  rows={3}
+                  disabled={isSaving}
+                />
+              ) : (
+                <div
+                  onClick={() => setIsEditing(true)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setIsEditing(true);
+                    }
+                  }}
+                  role="button"
+                  tabIndex={0}
+                  className="flex-1 cursor-pointer min-h-[2rem]"
+                >
+                  {content || 'Click to add callout content...'}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+
       case 'text':
       default:
         return (
@@ -369,6 +764,8 @@ export function BlockEditor({
     todo_list: 'Todo list block',
     bulleted_list: 'Bulleted list block',
     numbered_list: 'Numbered list block',
+    toggle: 'Toggle block',
+    callout: 'Callout block',
   }[blockType] || 'Content block';
 
   return (

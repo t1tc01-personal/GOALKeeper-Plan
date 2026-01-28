@@ -8,8 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { toast } from 'sonner'
-import { BlockEditor } from '@/components/BlockEditor'
-import { BlockList } from '@/components/BlockList'
+import { PageEditor } from '@/components/PageEditor'
 import { useAuthStore } from '@/features/auth/store/authStore'
 
 export default function WorkspacePage() {
@@ -301,7 +300,7 @@ export default function WorkspacePage() {
             </div>
 
             {/* Blocks */}
-            <BlockList pageId={selectedPage.id} />
+            <PageEditor pageId={selectedPage.id} />
           </div>
         ) : (
           <div className="flex items-center justify-center h-full">

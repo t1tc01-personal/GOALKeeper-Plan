@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { WorkspacePageShell } from '../components/WorkspacePageShell';
-import { BlockList } from '../components/BlockList';
+import { PageEditor } from '../components/PageEditor';
 import { ShareDialog } from '../components/ShareDialog';
 import { workspaceApi, type Page } from '@/services/workspaceApi';
 import { useSearchParams } from 'next/navigation';
@@ -163,7 +163,7 @@ export function WorkspacePageView() {
         Created: {page?.created_at ? new Date(page.created_at).toLocaleDateString() : 'Unknown'}
       </div>
 
-      <BlockList pageId={page?.id} />
+      <PageEditor pageId={page?.id} />
 
       {showShareDialog && page && (
         <ShareDialog pageId={page.id} onClose={() => setShowShareDialog(false)} />

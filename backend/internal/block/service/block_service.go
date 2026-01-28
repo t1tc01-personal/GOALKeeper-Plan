@@ -2,15 +2,19 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"goalkeeper-plan/internal/block/dto"
+	"goalkeeper-plan/internal/block/messages"
 	"goalkeeper-plan/internal/block/model"
 	"goalkeeper-plan/internal/block/repository"
 	"goalkeeper-plan/internal/cache"
+	appErrors "goalkeeper-plan/internal/errors"
 	"goalkeeper-plan/internal/logger"
 	"goalkeeper-plan/internal/validation"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 	"go.uber.org/zap"
 )
 
@@ -25,6 +29,7 @@ type BlockService interface {
 	UpdateBlock(ctx context.Context, id uuid.UUID, content *string) (*model.Block, error)
 	DeleteBlock(ctx context.Context, id uuid.UUID) error
 	ReorderBlocks(ctx context.Context, pageID uuid.UUID, blockIDs []uuid.UUID) error
+	BatchSync(ctx context.Context, req *dto.BatchSyncRequest) (*dto.BatchSyncResponse, error)
 }
 
 type blockService struct {
@@ -179,6 +184,17 @@ func (s *blockService) UpdateBlock(ctx context.Context, id uuid.UUID, content *s
 
 	block, err := s.repo.GetByID(ctx, id)
 	if err != nil {
+		// Map DB not-found to domain not-found error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			appErr := appErrors.NewNotFoundError(
+				appErrors.CodeBlockNotFound,
+				messages.MsgBlockNotFound,
+				err,
+			)
+			logger.LogServiceError(s.logger, "update_block_not_found", appErr, zap.String("id", id.String()))
+			return nil, appErr
+		}
+
 		logger.LogServiceError(s.logger, "update_block_fetch", err, zap.String("id", id.String()))
 		return nil, err
 	}
@@ -248,4 +264,196 @@ func (s *blockService) ReorderBlocks(ctx context.Context, pageID uuid.UUID, bloc
 
 	logger.LogServiceSuccess(s.logger, "reorder_blocks", zap.String("pageID", pageID.String()), zap.Int("count", len(blockIDs)))
 	return nil
+}
+
+func (s *blockService) BatchSync(ctx context.Context, req *dto.BatchSyncRequest) (*dto.BatchSyncResponse, error) {
+	response := &dto.BatchSyncResponse{
+		Creates: []dto.BatchCreateResponse{},
+		Updates: []dto.BatchUpdateResponse{},
+		Deletes: []string{},
+		Errors:  []dto.BatchError{},
+	}
+
+	// Process creates
+	for _, createItem := range req.Creates {
+		pageID, err := uuid.Parse(createItem.PageID)
+		if err != nil {
+			response.Errors = append(response.Errors, dto.BatchError{
+				OperationID: createItem.TempID,
+				Type:        "create",
+				Error:       fmt.Sprintf("invalid page ID: %v", err),
+			})
+			continue
+		}
+
+		blockType, err := s.GetBlockTypeByName(ctx, createItem.Type)
+		if err != nil {
+			response.Errors = append(response.Errors, dto.BatchError{
+				OperationID: createItem.TempID,
+				Type:        "create",
+				Error:       fmt.Sprintf("invalid block type: %v", err),
+			})
+			continue
+		}
+
+		var content *string
+		if createItem.Content != "" {
+			content = &createItem.Content
+		}
+
+		block, err := s.CreateBlock(ctx, pageID, blockType, content, int64(createItem.Position))
+		if err != nil {
+			response.Errors = append(response.Errors, dto.BatchError{
+				OperationID: createItem.TempID,
+				Type:        "create",
+				Error:       err.Error(),
+			})
+			continue
+		}
+
+		blockContent := ""
+		if block.Content != nil {
+			blockContent = *block.Content
+		}
+
+		typeName := ""
+		if block.BlockType != nil {
+			typeName = block.BlockType.Name
+		}
+
+		response.Creates = append(response.Creates, dto.BatchCreateResponse{
+			TempID: createItem.TempID,
+			Block: dto.BlockResponse{
+				ID:          block.ID.String(),
+				PageID:      block.PageID.String(),
+				Type:        typeName,
+				Content:     blockContent,
+				Position:    int(block.Rank),
+				BlockConfig: block.Metadata,
+				CreatedAt:   block.CreatedAt,
+				UpdatedAt:   block.UpdatedAt,
+			},
+		})
+	}
+
+	// Process updates
+	for _, updateItem := range req.Updates {
+		blockID, err := uuid.Parse(updateItem.ID)
+		if err != nil {
+			response.Errors = append(response.Errors, dto.BatchError{
+				OperationID: updateItem.ID,
+				Type:        "update",
+				Error:       fmt.Sprintf("invalid block ID: %v", err),
+			})
+			continue
+		}
+
+		// Get existing block
+		block, err := s.GetBlock(ctx, blockID)
+		if err != nil {
+			response.Errors = append(response.Errors, dto.BatchError{
+				OperationID: updateItem.ID,
+				Type:        "update",
+				Error:       fmt.Sprintf("block not found: %v", err),
+			})
+			continue
+		}
+
+		// Update content if provided
+		var content *string
+		if updateItem.Content != "" {
+			content = &updateItem.Content
+		} else if block.Content != nil {
+			content = block.Content
+		}
+
+		// Update block
+		updatedBlock, err := s.UpdateBlock(ctx, blockID, content)
+		if err != nil {
+			response.Errors = append(response.Errors, dto.BatchError{
+				OperationID: updateItem.ID,
+				Type:        "update",
+				Error:       err.Error(),
+			})
+			continue
+		}
+
+		// Update type if provided
+		if updateItem.Type != "" && (block.BlockType == nil || block.BlockType.Name != updateItem.Type) {
+			_, err := s.GetBlockTypeByName(ctx, updateItem.Type)
+			if err == nil {
+				// Update block type (this would require a new service method or repository update)
+				// For now, we'll just update content and log a warning
+				s.logger.Warn("Block type update not fully implemented in batch sync",
+					zap.String("block_id", blockID.String()),
+					zap.String("new_type", updateItem.Type))
+			}
+		}
+
+		// Update position if provided
+		if updateItem.Position >= 0 {
+			// Position updates would require reordering logic
+			// For now, we'll skip position updates in batch sync
+			s.logger.Warn("Block position update not fully implemented in batch sync",
+				zap.String("block_id", blockID.String()),
+				zap.Int("new_position", updateItem.Position))
+		}
+
+		blockContent := ""
+		if updatedBlock.Content != nil {
+			blockContent = *updatedBlock.Content
+		}
+
+		typeName := ""
+		if updatedBlock.BlockType != nil {
+			typeName = updatedBlock.BlockType.Name
+		}
+
+		response.Updates = append(response.Updates, dto.BatchUpdateResponse{
+			ID: updateItem.ID,
+			Block: dto.BlockResponse{
+				ID:          updatedBlock.ID.String(),
+				PageID:      updatedBlock.PageID.String(),
+				Type:        typeName,
+				Content:     blockContent,
+				Position:    int(updatedBlock.Rank),
+				BlockConfig: updatedBlock.Metadata,
+				CreatedAt:   updatedBlock.CreatedAt,
+				UpdatedAt:   updatedBlock.UpdatedAt,
+			},
+		})
+	}
+
+	// Process deletes
+	for _, blockIDStr := range req.Deletes {
+		blockID, err := uuid.Parse(blockIDStr)
+		if err != nil {
+			response.Errors = append(response.Errors, dto.BatchError{
+				OperationID: blockIDStr,
+				Type:        "delete",
+				Error:       fmt.Sprintf("invalid block ID: %v", err),
+			})
+			continue
+		}
+
+		err = s.DeleteBlock(ctx, blockID)
+		if err != nil {
+			response.Errors = append(response.Errors, dto.BatchError{
+				OperationID: blockIDStr,
+				Type:        "delete",
+				Error:       err.Error(),
+			})
+			continue
+		}
+
+		response.Deletes = append(response.Deletes, blockIDStr)
+	}
+
+	logger.LogServiceSuccess(s.logger, "batch_sync",
+		zap.Int("creates", len(response.Creates)),
+		zap.Int("updates", len(response.Updates)),
+		zap.Int("deletes", len(response.Deletes)),
+		zap.Int("errors", len(response.Errors)))
+
+	return response, nil
 }

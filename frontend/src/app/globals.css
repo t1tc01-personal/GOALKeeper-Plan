@@ -240,6 +240,24 @@
   display: none;  /* Chrome, Safari and Opera */
 }
 
+/* Remove border and outline from contentEditable blocks */
+[contenteditable],
+[contenteditable]:focus,
+[contenteditable]:focus-visible {
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* Block editor items - no border on focus */
+.block-editor-item,
+.block-editor-item:focus,
+.block-editor-item:focus-visible {
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
 /* ============================================================
    ACCESSIBILITY ENHANCEMENTS
    ============================================================ */

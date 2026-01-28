@@ -8,6 +8,8 @@ const (
 	MsgBlocksFetched   = "Blocks retrieved successfully"
 	MsgBlocksListed    = "Blocks retrieved successfully"
 	MsgBlocksReordered = "Blocks reordered successfully"
+	MsgBlocksSynced    = "Blocks synced successfully"
+	MsgFailedToSyncBlocks = "Failed to sync blocks"
 
 	// Error messages
 	MsgBlockNotFound         = "Block not found"

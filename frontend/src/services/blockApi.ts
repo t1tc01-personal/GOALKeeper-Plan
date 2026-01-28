@@ -66,6 +66,7 @@ export interface CreateBlockRequest {
   type: string;
   content?: string;
   position: number;
+  blockConfig?: Record<string, any>;
 }
 
 export interface UpdateBlockRequest {
@@ -78,6 +79,42 @@ export interface UpdateBlockRequest {
 export interface ReorderBlocksRequest {
   pageId: string;
   blockIds: string[];
+}
+
+export interface BatchSyncRequest {
+  creates?: Array<{
+    pageId: string;
+    type: string;
+    content?: string;
+    position: number;
+    blockConfig?: Record<string, any>;
+    tempId: string;
+  }>;
+  updates?: Array<{
+    id: string;
+    content?: string;
+    type?: string;
+    position?: number;
+    blockConfig?: Record<string, any>;
+  }>;
+  deletes?: string[];
+}
+
+export interface BatchSyncResponse {
+  creates: Array<{
+    tempId: string;
+    block: Block;
+  }>;
+  updates: Array<{
+    id: string;
+    block: Block;
+  }>;
+  deletes: string[];
+  errors?: Array<{
+    operationId: string;
+    type: 'create' | 'update' | 'delete';
+    error: string;
+  }>;
 }
 
 export interface ApiResponse<T> {
@@ -188,14 +225,17 @@ class BlockApiClient {
 
   // Block endpoints
   async createBlock(req: CreateBlockRequest): Promise<Block> {
+    const requestBody: Record<string, any> = {
+      pageId: req.pageId,
+      type: req.type,
+      position: req.position,
+    };
+    if (req.content !== undefined) requestBody.content = req.content;
+    if (req.blockConfig !== undefined) requestBody.blockConfig = req.blockConfig;
+
     const response = await this.request<Block>('/notion/blocks', {
       method: 'POST',
-      body: JSON.stringify({
-        pageId: req.pageId,
-        type: req.type,
-        content: req.content,
-        position: req.position,
-      }),
+      body: JSON.stringify(requestBody),
     });
     return normalizeBlock(response.data!);
   }
@@ -233,12 +273,37 @@ class BlockApiClient {
   }
 
   async reorderBlocks(req: ReorderBlocksRequest): Promise<void> {
-    await this.request('/notion/blocks/reorder', {
+    // Backend expects pageId as a query parameter
+    const url = `/notion/blocks/reorder?pageId=${encodeURIComponent(req.pageId)}`;
+    await this.request(url, {
       method: 'POST',
       body: JSON.stringify({
         blockIds: req.blockIds,
       }),
     });
+  }
+
+  async batchSync(req: BatchSyncRequest): Promise<BatchSyncResponse> {
+    const response = await this.request<BatchSyncResponse>('/notion/blocks/batch', {
+      method: 'POST',
+      body: JSON.stringify(req),
+    });
+    
+    // Normalize blocks in response
+    const normalizedResponse: BatchSyncResponse = {
+      creates: (response.data?.creates || []).map((create) => ({
+        ...create,
+        block: normalizeBlock(create.block),
+      })),
+      updates: (response.data?.updates || []).map((update) => ({
+        ...update,
+        block: normalizeBlock(update.block),
+      })),
+      deletes: response.data?.deletes || [],
+      errors: response.data?.errors,
+    };
+    
+    return normalizedResponse;
   }
 }
 

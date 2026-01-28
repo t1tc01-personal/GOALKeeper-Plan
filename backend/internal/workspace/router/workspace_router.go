@@ -52,5 +52,6 @@ func NewRouter(baseRouter interface{}, workspaceController controller.WorkspaceC
 		blocks.PUT("/:id", blockCtl.UpdateBlock)
 		blocks.DELETE("/:id", blockCtl.DeleteBlock)
 		blocks.POST("/reorder", blockCtl.ReorderBlocks)
+		blocks.POST("/batch", blockCtl.BatchSync)
 	}
 }
