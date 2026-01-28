@@ -27,40 +27,6 @@ interface InlineBlockEditorProps {
   readonly onUpdateBlock?: (blockId: string, data: { content?: string; type?: string; blockConfig?: Record<string, any> }) => void;
 }
 
-// Debounce helper with cancel support
-function useDebounce<T extends (...args: any[]) => void>(
-  callback: T,
-  delay: number
-): [T, () => void] {
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const callbackRef = useRef(callback);
-
-  useEffect(() => {
-    callbackRef.current = callback;
-  }, [callback]);
-
-  const debounced = useCallback(
-    ((...args: Parameters<T>) => {
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-      }
-      timeoutRef.current = setTimeout(() => {
-        callbackRef.current(...args);
-      }, delay);
-    }) as T,
-    [delay]
-  );
-
-  const cancel = useCallback(() => {
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-      timeoutRef.current = null;
-    }
-  }, []);
-
-  return [debounced as T, cancel];
-}
-
 export function InlineBlockEditor({
   block,
   isFocused,
@@ -89,6 +55,7 @@ export function InlineBlockEditor({
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const [slashMenuPosition, setSlashMenuPosition] = useState<{ top: number; left: number } | undefined>();
   const [slashQuery, setSlashQuery] = useState('');
+  const [justClosedMenu, setJustClosedMenu] = useState(false);
   const editorRef = useRef<HTMLDivElement>(null);
   const isTempBlock = block.id.startsWith('temp-');
 
@@ -99,52 +66,29 @@ export function InlineBlockEditor({
     }
   }, [block.content, isFocused, isTempBlock]);
 
-  // Debounced save function - direct API update via onUpdateBlock
-  const [debouncedSave, cancelDebouncedSave] = useDebounce(
-    (blockId: string, content: string, blockType: string) => {
-    if (isTempBlock || blockId.startsWith('temp-')) {
-      // Temp blocks will be saved when they get real IDs
-      return;
-    }
-
-    if (!onUpdateBlock) {
-      // Fallback: if no queue callback provided, skip (should not happen)
-      console.warn('onUpdateBlock not provided, skipping save');
-      return;
-    }
-
-    // Queue update to batch sync
-    const currentMetadata = block.metadata || block.blockConfig || {};
-    const updateData: { content?: string; type?: string; blockConfig?: Record<string, any> } = {
-      content: content || undefined,
-    };
-
-    // Handle metadata for specific block types
-    if (blockType === 'toggle' || blockType === 'callout') {
-      updateData.blockConfig = currentMetadata;
-    }
-
-    onUpdateBlock(blockId, updateData);
-  },
-  1500); // 1.5s debounce
-
-  // Cleanup debounce on unmount or when block is deleted
-  useEffect(() => {
-    return () => {
-      cancelDebouncedSave();
-    };
-  }, [cancelDebouncedSave]);
+  // Cleanup on unmount (no longer using debounced save)
 
   // Handle content change
   const handleContentChange = (newContent: string) => {
     setContent(newContent);
     onContentChange(block.id, newContent);
     
-    // Trigger debounced save (only for non-temp blocks)
-    // Check again in case block was deleted
-    if (!block.id.startsWith('temp-') && block.id) {
+    // Immediate sync - call onUpdateBlock directly on every keystroke
+    // (only for non-temp blocks)
+    if (!block.id.startsWith('temp-') && block.id && onUpdateBlock) {
       const blockType = block.type_id || block.type || 'text';
-      debouncedSave(block.id, newContent, blockType);
+      const currentMetadata = block.metadata || block.blockConfig || {};
+      const updateData: { content?: string; type?: string; blockConfig?: Record<string, any> } = {
+        content: newContent || undefined,
+      };
+
+      // Handle metadata for specific block types
+      if (blockType === 'toggle' || blockType === 'callout') {
+        updateData.blockConfig = currentMetadata;
+      }
+
+      // Call immediately for instant batch sync
+      onUpdateBlock(block.id, updateData);
     }
   };
 
@@ -191,13 +135,11 @@ export function InlineBlockEditor({
             if (content === '' && !isTempBlock) {
               // Empty block: Delete block
               e.preventDefault();
-              cancelDebouncedSave();
               onBackspace(block.id);
               return;
             } else if (content.length > 0 && onMerge) {
               // Block with content: Merge with previous block (Notion-style)
               e.preventDefault();
-              cancelDebouncedSave();
               onMerge(block.id);
               return;
             }
@@ -206,14 +148,10 @@ export function InlineBlockEditor({
       }
     }
 
-    // Escape: Close slash menu
+    // Escape: Close slash menu (handled by SlashCommandMenu component)
+    // The SlashCommandMenu will prevent default and call onInsertSlash to keep the "/"
     if (e.key === 'Escape' && showSlashMenu) {
-      e.preventDefault();
-      setShowSlashMenu(false);
-      setSlashQuery('');
-      // Remove the "/" from content
-      const newContent = content.slice(0, -1);
-      handleContentChange(newContent);
+      // Let SlashCommandMenu handle the escape key
       return;
     }
 
@@ -266,7 +204,8 @@ export function InlineBlockEditor({
     const hasSlash = content.includes('/');
 
     // Open menu when user has just typed "/" (content ends with "/")
-    if (!showSlashMenu && hasSlash && content.endsWith('/')) {
+    // But NOT if menu was just closed via ESC (justClosedMenu = true)
+    if (!showSlashMenu && hasSlash && content.endsWith('/') && !justClosedMenu) {
       const rect = editorRef.current?.getBoundingClientRect();
       if (rect) {
         setSlashMenuPosition({
@@ -277,6 +216,11 @@ export function InlineBlockEditor({
       }
     }
 
+    // Reset justClosedMenu flag when user continues typing after "/"
+    if (justClosedMenu && !content.endsWith('/')) {
+      setJustClosedMenu(false);
+    }
+
     if (showSlashMenu && hasSlash) {
       const lastSlashIndex = content.lastIndexOf('/');
       const query = content.slice(lastSlashIndex + 1);
@@ -285,7 +229,7 @@ export function InlineBlockEditor({
       setShowSlashMenu(false);
       setSlashQuery('');
     }
-  }, [content, showSlashMenu]);
+  }, [content, showSlashMenu, justClosedMenu]);
 
   // Handle slash menu selection
   const handleSlashMenuSelect = (blockType: BlockTypeConfig) => {
@@ -577,6 +521,12 @@ export function InlineBlockEditor({
             setSlashQuery('');
           }}
           onSelect={handleSlashMenuSelect}
+          onInsertSlash={() => {
+            // Keep the "/" and close menu, set flag to prevent reopening
+            setShowSlashMenu(false);
+            setSlashQuery('');
+            setJustClosedMenu(true);
+          }}
           query={slashQuery}
           position={slashMenuPosition}
         />

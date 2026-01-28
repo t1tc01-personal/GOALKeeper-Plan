@@ -14,8 +14,8 @@ import (
 	"goalkeeper-plan/internal/validation"
 
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 type BlockService interface {
@@ -367,7 +367,7 @@ func (s *blockService) BatchSync(ctx context.Context, req *dto.BatchSyncRequest)
 			content = block.Content
 		}
 
-		// Update block
+		// Update block content
 		updatedBlock, err := s.UpdateBlock(ctx, blockID, content)
 		if err != nil {
 			response.Errors = append(response.Errors, dto.BatchError{
@@ -380,23 +380,45 @@ func (s *blockService) BatchSync(ctx context.Context, req *dto.BatchSyncRequest)
 
 		// Update type if provided
 		if updateItem.Type != "" && (block.BlockType == nil || block.BlockType.Name != updateItem.Type) {
-			_, err := s.GetBlockTypeByName(ctx, updateItem.Type)
-			if err == nil {
-				// Update block type (this would require a new service method or repository update)
-				// For now, we'll just update content and log a warning
-				s.logger.Warn("Block type update not fully implemented in batch sync",
-					zap.String("block_id", blockID.String()),
-					zap.String("new_type", updateItem.Type))
+			blockType, err := s.GetBlockTypeByName(ctx, updateItem.Type)
+			if err != nil {
+				response.Errors = append(response.Errors, dto.BatchError{
+					OperationID: updateItem.ID,
+					Type:        "update",
+					Error:       fmt.Sprintf("invalid block type: %v", err),
+				})
+				continue
+			}
+
+			// Update block type in model
+			updatedBlock.TypeID = blockType.ID
+			updatedBlock.BlockType = blockType
+
+			// Persist type change
+			if err := s.repo.Update(ctx, updatedBlock); err != nil {
+				response.Errors = append(response.Errors, dto.BatchError{
+					OperationID: updateItem.ID,
+					Type:        "update",
+					Error:       fmt.Sprintf("failed to update block type: %v", err),
+				})
+				continue
 			}
 		}
 
 		// Update position if provided
-		if updateItem.Position >= 0 {
-			// Position updates would require reordering logic
-			// For now, we'll skip position updates in batch sync
-			s.logger.Warn("Block position update not fully implemented in batch sync",
-				zap.String("block_id", blockID.String()),
-				zap.Int("new_position", updateItem.Position))
+		if updateItem.Position != nil && *updateItem.Position != int(updatedBlock.Rank) {
+			// Update block position (rank/order)
+			updatedBlock.Rank = int64(*updateItem.Position)
+
+			// Persist position change
+			if err := s.repo.Update(ctx, updatedBlock); err != nil {
+				response.Errors = append(response.Errors, dto.BatchError{
+					OperationID: updateItem.ID,
+					Type:        "update",
+					Error:       fmt.Sprintf("failed to update block position: %v", err),
+				})
+				continue
+			}
 		}
 
 		blockContent := ""

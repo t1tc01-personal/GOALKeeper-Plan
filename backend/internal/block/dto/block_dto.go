@@ -46,26 +46,26 @@ type BatchUpdateItem struct {
 	ID          string         `json:"id" validate:"required"`
 	Content     string         `json:"content,omitempty"`
 	Type        string         `json:"type,omitempty" validate:"omitempty,min=1"`
-	Position    int            `json:"position,omitempty"`
+	Position    *int           `json:"position,omitempty"` // Use pointer to distinguish between 0 and not provided
 	BlockConfig map[string]any `json:"blockConfig,omitempty"`
 }
 
 type BatchSyncRequest struct {
 	Creates []BatchCreateItem `json:"creates,omitempty"`
 	Updates []BatchUpdateItem `json:"updates,omitempty"`
-	Deletes []string           `json:"deletes,omitempty" validate:"dive,uuid"`
+	Deletes []string          `json:"deletes,omitempty" validate:"dive,uuid"`
 }
 
 type BatchSyncResponse struct {
 	Creates []BatchCreateResponse `json:"creates"`
 	Updates []BatchUpdateResponse `json:"updates"`
-	Deletes []string               `json:"deletes"`
-	Errors  []BatchError           `json:"errors,omitempty"`
+	Deletes []string              `json:"deletes"`
+	Errors  []BatchError          `json:"errors,omitempty"`
 }
 
 type BatchCreateResponse struct {
-	TempID string         `json:"tempId"`
-	Block  BlockResponse  `json:"block"`
+	TempID string        `json:"tempId"`
+	Block  BlockResponse `json:"block"`
 }
 
 type BatchUpdateResponse struct {

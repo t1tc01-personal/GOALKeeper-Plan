@@ -4,6 +4,7 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { Card } from './ui/card';
 import { InlineBlockEditor } from './InlineBlockEditor';
 import { blockApi, type Block } from '@/services/blockApi';
+import { BlockSyncQueue, type BatchSyncResponse } from '@/services/blockSyncQueue';
 import { CONTENT_BLOCK_TYPES, type BlockTypeConfig } from '@/shared/types/blocks';
 
 interface PageEditorProps {
@@ -24,6 +25,10 @@ export function PageEditor({ pageId }: PageEditorProps) {
   const [pendingCreates, setPendingCreates] = useState<Map<string, Block>>(new Map());
   const blockRefsMap = useRef<Map<string, HTMLDivElement>>(new Map());
   const [cursorPositions, setCursorPositions] = useState<Map<string, number>>(new Map());
+  const [draggedBlockId, setDraggedBlockId] = useState<string | null>(null);
+  const [dragOverBlockId, setDragOverBlockId] = useState<string | null>(null);
+  const syncQueueRef = useRef<BlockSyncQueue | null>(null);
+  const tempIdMapRef = useRef<Map<string, string>>(new Map()); // Maps temp IDs to real block IDs
 
   // Load blocks from server
   useEffect(() => {
@@ -57,70 +62,117 @@ export function PageEditor({ pageId }: PageEditorProps) {
     return allBlocks.sort((a, b) => a.position - b.position);
   }, [blocks, pendingCreates]);
 
-  // Create block on server for a temp block (optimistic create with rollback)
-  const createBlockOnServer = useCallback(
-    async (tempBlock: Block, blockType: BlockTypeConfig) => {
-      if (!pageId) return;
+  // Handle batch sync success - update state with real block IDs
+  const handleSyncSuccess = useCallback((response: BatchSyncResponse) => {
+    // Process creates - map temp IDs to real IDs
+    if (response.creates && response.creates.length > 0) {
+      const tempToRealMap = new Map<string, string>();
+      
+      response.creates.forEach((createResult) => {
+        tempToRealMap.set(createResult.tempId, createResult.block.id);
+        tempIdMapRef.current.set(createResult.tempId, createResult.block.id);
+      });
 
-      try {
-        const createdBlock = await blockApi.createBlock({
-          pageId,
-          type: blockType.name,
-          content: tempBlock.content,
-          position: tempBlock.position,
-          blockConfig: blockType.defaultMetadata || {},
+      // Remove temp blocks and add real blocks
+      setPendingCreates((prev) => {
+        const next = new Map(prev);
+        response.creates!.forEach((createResult) => {
+          next.delete(createResult.tempId);
         });
+        return next;
+      });
 
-        // Remove temp from pending
-        setPendingCreates((prev) => {
-          const next = new Map(prev);
-          next.delete(tempBlock.id);
-          return next;
+      // Add created blocks to blocks list
+      setBlocks((prevBlocks) => {
+        const newBlocks = [...prevBlocks];
+        response.creates!.forEach((createResult) => {
+          newBlocks.push({
+            id: createResult.block.id,
+            pageId: createResult.block.pageId,
+            type: createResult.block.type,
+            content: createResult.block.content,
+            position: createResult.block.position,
+            blockConfig: createResult.block.blockConfig,
+            created_at: createResult.block.created_at,
+            updated_at: createResult.block.updated_at,
+          });
         });
+        return newBlocks.sort((a, b) => a.position - b.position);
+      });
 
-        // Insert created block
-        setBlocks((prevBlocks) => {
-          const next = [...prevBlocks, createdBlock].sort(
-            (a, b) => a.position - b.position
-          );
-          return next;
-        });
-
-        // Preserve focus and cursor position
-        setFocusedBlockId((prev) =>
-          prev === tempBlock.id ? createdBlock.id : prev
-        );
-        setCursorPositions((prev) => {
-          const next = new Map(prev);
-          if (next.has(tempBlock.id)) {
-            const pos = next.get(tempBlock.id)!;
-            next.delete(tempBlock.id);
-            next.set(createdBlock.id, pos);
+      // Update cursor position map with real IDs
+      setCursorPositions((prev) => {
+        const next = new Map(prev);
+        tempToRealMap.forEach((realId, tempId) => {
+          if (next.has(tempId)) {
+            next.set(realId, next.get(tempId)!);
+            next.delete(tempId);
           }
-          return next;
         });
-      } catch (err) {
-        console.error('Failed to create block:', err);
-        setError(err instanceof Error ? err.message : 'Failed to create block');
+        return next;
+      });
 
-        // Rollback: remove temp block and restore positions
-        setPendingCreates((prev) => {
-          const next = new Map(prev);
-          next.delete(tempBlock.id);
-          return next;
-        });
+      // Update focused block if it was temp
+      setFocusedBlockId((prev) => {
+        if (prev && tempToRealMap.has(prev)) {
+          return tempToRealMap.get(prev)!;
+        }
+        return prev;
+      });
+    }
 
-        setBlocks((prevBlocks) =>
-          prevBlocks.map((b) =>
-            b.position > tempBlock.position
-              ? { ...b, position: b.position - 1 }
-              : b
-          )
-        );
+    // Process updates - state should already be updated optimistically
+    if (response.updates && response.updates.length > 0) {
+      // Verify updates succeeded, state is already optimistically updated
+      response.updates.forEach((updateResult) => {
+        console.log('Block updated:', updateResult.id);
+      });
+    }
+
+    // Process deletes - state should already be updated optimistically
+    if (response.deletes && response.deletes.length > 0) {
+      // Verify deletes succeeded, state is already optimistically updated
+      response.deletes.forEach((blockId) => {
+        console.log('Block deleted:', blockId);
+      });
+    }
+
+    // Handle errors if any
+    if (response.errors && response.errors.length > 0) {
+      const errorMessages = response.errors.map((e) => `${e.type} (${e.operationId}): ${e.error}`).join('; ');
+      setError(`Some operations failed: ${errorMessages}`);
+    }
+  }, []);
+
+  // Initialize sync queue with callbacks
+  useEffect(() => {
+    if (!syncQueueRef.current) {
+      syncQueueRef.current = new BlockSyncQueue({
+        syncInterval: 2000, // Debounce for 2 seconds
+        maxBatchSize: 50, // Max 50 operations per batch
+        maxRetries: 5, // Retry failed ops up to 5 times
+        baseRetryDelay: 1000,
+        maxRetryDelay: 30000,
+      });
+
+      // Set sync callbacks
+      syncQueueRef.current.setSyncCallbacks({
+        onSyncSuccess: handleSyncSuccess,
+        onSyncError: (error: Error) => {
+          console.error('Sync queue error:', error);
+          setError(error.message || 'Failed to sync blocks');
+        },
+      });
+    }
+
+    return () => {
+      // Cleanup on unmount
+      if (syncQueueRef.current) {
+        syncQueueRef.current.destroy();
+        syncQueueRef.current = null;
       }
-    },
-    [pageId]
-  );
+    };
+  }, [handleSyncSuccess]);
 
   // Create new block
   const createNewBlock = useCallback(
@@ -201,10 +253,29 @@ export function PageEditor({ pageId }: PageEditorProps) {
         });
       }, 0);
       
-      // Optimistic create: persist to server for this single block
-      void createBlockOnServer(newBlock, blockType);
+      // Enqueue create operation to sync queue
+      if (syncQueueRef.current) {
+        syncQueueRef.current.enqueue({
+          id: tempId,
+          type: 'create',
+          blockId: tempId,
+          data: {
+            pageId: pageId,
+            type: blockType.name,
+            content: content,
+            position: newPosition,
+            blockConfig: blockType.defaultMetadata || {},
+          },
+          timestamp: Date.now(),
+          priority: 'normal',
+        });
+        // Force immediate sync for testing
+        syncQueueRef.current.forceSync().catch((err) => {
+          console.error('Force sync failed:', err);
+        });
+      }
     },
-    [pageId, getAllBlocks, createBlockOnServer]
+    [pageId, getAllBlocks]
   );
 
   // Note: saveBlockToServer removed - all creates now go through batch sync queue
@@ -243,16 +314,28 @@ export function PageEditor({ pageId }: PageEditorProps) {
 
   // Handle block update - optimistic update + API call (debounced from InlineBlockEditor)
   const handleUpdateBlock = useCallback(
-    async (blockId: string, data: { content?: string; type?: string; blockConfig?: Record<string, any> }) => {
+    (blockId: string, data: { content?: string; type?: string; blockConfig?: Record<string, any> }) => {
       // Check if block exists
       const existingBlock = blocks.find((b) => b.id === blockId);
       if (!existingBlock || blockId.startsWith('temp-')) {
-        // Block doesn't exist or is temp, ignore
+        // Block doesn't exist or is temp, update it in pending
+        if (blockId.startsWith('temp-')) {
+          setPendingCreates((prev) => {
+            const next = new Map(prev);
+            const block = next.get(blockId);
+            if (block) {
+              next.set(blockId, {
+                ...block,
+                ...(data.content !== undefined && { content: data.content }),
+                ...(data.type !== undefined && { type: data.type, type_id: data.type }),
+                ...(data.blockConfig !== undefined && { blockConfig: data.blockConfig, metadata: data.blockConfig }),
+              });
+            }
+            return next;
+          });
+        }
         return;
       }
-
-      // Keep snapshot for rollback
-      const previousBlocks = blocks;
 
       // Optimistic update in local state
       setBlocks((prevBlocks) => 
@@ -268,17 +351,24 @@ export function PageEditor({ pageId }: PageEditorProps) {
         )
       );
 
-      try {
-        await blockApi.updateBlock(blockId, {
-          content: data.content,
-          type: data.type,
-          blockConfig: data.blockConfig,
+      // Enqueue update operation
+      if (syncQueueRef.current) {
+        syncQueueRef.current.enqueue({
+          id: `update-${blockId}-${Date.now()}`,
+          type: 'update',
+          blockId: blockId,
+          data: {
+            content: data.content,
+            type: data.type,
+            blockConfig: data.blockConfig,
+          },
+          timestamp: Date.now(),
+          priority: 'normal',
         });
-      } catch (err) {
-        // Rollback on failure
-        console.error('Failed to update block:', err);
-        setBlocks(previousBlocks);
-        setError(err instanceof Error ? err.message : 'Failed to update block');
+        // Force immediate sync for testing
+        syncQueueRef.current.forceSync().catch((err) => {
+          console.error('Force sync failed:', err);
+        });
       }
     },
     [blocks]
@@ -319,7 +409,7 @@ export function PageEditor({ pageId }: PageEditorProps) {
 
   // Handle Backspace on empty block
   const handleBackspace = useCallback(
-    async (blockId: string) => {
+    (blockId: string) => {
       const allBlocks = getAllBlocks();
       const block = allBlocks.find((b) => b.id === blockId);
       if (!block) return;
@@ -336,14 +426,21 @@ export function PageEditor({ pageId }: PageEditorProps) {
         });
       } else {
         // Optimistic delete - remove from UI immediately
-        const previousBlocks = blocks;
         setBlocks((prevBlocks) => prevBlocks.filter((b) => b.id !== blockId));
 
-        try {
-          await blockApi.deleteBlock(blockId);
-        } catch (err) {
-          console.error('Failed to delete block:', err);
-          setBlocks(previousBlocks);
+        // Enqueue delete operation
+        if (syncQueueRef.current) {
+          syncQueueRef.current.enqueue({
+            id: `delete-${blockId}-${Date.now()}`,
+            type: 'delete',
+            blockId: blockId,
+            timestamp: Date.now(),
+            priority: 'normal',
+          });
+          // Force immediate sync for testing
+          syncQueueRef.current.forceSync().catch((err) => {
+            console.error('Force sync failed:', err);
+          });
         }
       }
 
@@ -361,12 +458,12 @@ export function PageEditor({ pageId }: PageEditorProps) {
         }, 0);
       }
     },
-    [getAllBlocks, blocks]
+    [getAllBlocks]
   );
 
   // Handle Merge: Merge current block with previous block (Notion-style)
   const handleMerge = useCallback(
-    async (blockId: string) => {
+    (blockId: string) => {
       const allBlocks = getAllBlocks();
       const block = allBlocks.find((b) => b.id === blockId);
       if (!block) return;
@@ -408,20 +505,29 @@ export function PageEditor({ pageId }: PageEditorProps) {
             return next;
           });
         } else {
-          // Previous is real block - optimistic update + API call
-          const previousBlocks = blocks;
+          // Previous is real block - optimistic update + enqueue
           setBlocks((prevBlocks) =>
             prevBlocks.map((b) =>
               b.id === prevBlock.id ? { ...b, content: mergedContent } : b
             )
           );
 
-          try {
-            await blockApi.updateBlock(prevBlock.id, { content: mergedContent });
-          } catch (err) {
-            console.error('Failed to merge blocks:', err);
-            setBlocks(previousBlocks);
-            return;
+          // Enqueue update operation
+          if (syncQueueRef.current) {
+            syncQueueRef.current.enqueue({
+              id: `update-${prevBlock.id}-${Date.now()}`,
+              type: 'update',
+              blockId: prevBlock.id,
+              data: {
+                content: mergedContent,
+              },
+              timestamp: Date.now(),
+              priority: 'normal',
+            });
+            // Force immediate sync for testing
+            syncQueueRef.current.forceSync().catch((err) => {
+              console.error('Force sync failed:', err);
+            });
           }
         }
       } else {
@@ -437,19 +543,24 @@ export function PageEditor({ pageId }: PageEditorProps) {
           });
 
           // Optimistic delete for current real block
-          const previousBlocks = blocks;
           setBlocks((prevBlocks) => prevBlocks.filter((b) => b.id !== blockId));
 
-          try {
-            await blockApi.deleteBlock(blockId);
-          } catch (err) {
-            console.error('Failed to delete block during merge:', err);
-            setBlocks(previousBlocks);
-            return;
+          // Enqueue delete operation
+          if (syncQueueRef.current) {
+            syncQueueRef.current.enqueue({
+              id: `delete-${blockId}-${Date.now()}`,
+              type: 'delete',
+              blockId: blockId,
+              timestamp: Date.now(),
+              priority: 'normal',
+            });
+            // Force immediate sync for testing
+            syncQueueRef.current.forceSync().catch((err) => {
+              console.error('Force sync failed:', err);
+            });
           }
         } else {
-          // Both blocks are real - optimistic update & delete + API calls
-          const previousBlocks = blocks;
+          // Both blocks are real - optimistic update & delete + enqueue both
           setBlocks((prevBlocks) => {
             const updated = prevBlocks
               .map((b) =>
@@ -459,13 +570,30 @@ export function PageEditor({ pageId }: PageEditorProps) {
             return updated;
           });
 
-          try {
-            await blockApi.updateBlock(prevBlock.id, { content: mergedContent });
-            await blockApi.deleteBlock(blockId);
-          } catch (err) {
-            console.error('Failed to merge blocks:', err);
-            setBlocks(previousBlocks);
-            return;
+          // Enqueue both operations
+          if (syncQueueRef.current) {
+            syncQueueRef.current.enqueue({
+              id: `update-${prevBlock.id}-${Date.now()}`,
+              type: 'update',
+              blockId: prevBlock.id,
+              data: {
+                content: mergedContent,
+              },
+              timestamp: Date.now(),
+              priority: 'normal',
+            });
+
+            syncQueueRef.current.enqueue({
+              id: `delete-${blockId}-${Date.now()}`,
+              type: 'delete',
+              blockId: blockId,
+              timestamp: Date.now(),
+              priority: 'normal',
+            });
+            // Force immediate sync for testing
+            syncQueueRef.current.forceSync().catch((err) => {
+              console.error('Force sync failed:', err);
+            });
           }
         }
       }
@@ -680,6 +808,112 @@ export function PageEditor({ pageId }: PageEditorProps) {
     [getAllBlocks, blocks]
   );
 
+  // Handle drag start
+  const handleDragStart = useCallback(
+    (blockId: string) => {
+      setDraggedBlockId(blockId);
+    },
+    []
+  );
+
+  // Handle drag over
+  const handleDragOver = useCallback(
+    (e: React.DragEvent<HTMLDivElement>, blockId: string) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setDragOverBlockId(blockId);
+    },
+    []
+  );
+
+  // Handle drag leave
+  const handleDragLeave = useCallback(
+    (e: React.DragEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setDragOverBlockId(null);
+    },
+    []
+  );
+
+  // Handle drop
+  const handleDrop = useCallback(
+    (e: React.DragEvent<HTMLDivElement>, dropBlockId: string) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setDragOverBlockId(null);
+
+      if (!draggedBlockId || draggedBlockId === dropBlockId) {
+        setDraggedBlockId(null);
+        return;
+      }
+
+      const allBlocks = getAllBlocks();
+      const draggedBlock = allBlocks.find((b) => b.id === draggedBlockId);
+      const dropBlock = allBlocks.find((b) => b.id === dropBlockId);
+
+      if (!draggedBlock || !dropBlock) {
+        setDraggedBlockId(null);
+        return;
+      }
+
+      // Calculate new positions
+      const draggedIndex = allBlocks.findIndex((b) => b.id === draggedBlockId);
+      const dropIndex = allBlocks.findIndex((b) => b.id === dropBlockId);
+
+      if (draggedIndex === dropIndex) {
+        setDraggedBlockId(null);
+        return;
+      }
+
+      // Reorder blocks
+      const newBlocks = [...allBlocks];
+      const [movedBlock] = newBlocks.splice(draggedIndex, 1);
+      newBlocks.splice(dropIndex, 0, movedBlock);
+
+      // Recalculate positions (100, 200, 300, etc.)
+      const reorderedBlocks = newBlocks.map((block, index) => ({
+        ...block,
+        position: (index + 1) * 100,
+      }));
+
+      // Separate real and pending blocks
+      const realBlocks = reorderedBlocks.filter((b) => !b.id.startsWith('temp-'));
+      const pendingBlocks = reorderedBlocks.filter((b) => b.id.startsWith('temp-'));
+
+      // Update UI optimistically
+      setBlocks(realBlocks);
+      if (pendingBlocks.length > 0) {
+        setPendingCreates(
+          new Map(pendingBlocks.map((b) => [b.id, b]))
+        );
+      }
+
+      // Enqueue position updates for real blocks
+      if (syncQueueRef.current) {
+        realBlocks.forEach((block) => {
+          syncQueueRef.current!.enqueue({
+            id: `update-position-${block.id}-${Date.now()}`,
+            type: 'update',
+            blockId: block.id,
+            data: {
+              position: block.position,
+            },
+            timestamp: Date.now(),
+            priority: 'high', // Higher priority for drag operations
+          });
+        });
+        // Force immediate sync for testing
+        syncQueueRef.current.forceSync().catch((err) => {
+          console.error('Force sync failed:', err);
+        });
+      }
+
+      setDraggedBlockId(null);
+    },
+    [draggedBlockId, getAllBlocks]
+  );
+
   if (!pageId) {
     return (
       <section className="space-y-2">
@@ -733,9 +967,18 @@ export function PageEditor({ pageId }: PageEditorProps) {
           ref={(el) => {
             if (el) blockRefsMap.current.set(block.id, el);
           }}
-          className="block-editor-item"
+          draggable={true}
+          onDragStart={() => handleDragStart(block.id)}
+          onDragOver={(e) => handleDragOver(e, block.id)}
+          onDragLeave={(e) => handleDragLeave(e)}
+          onDrop={(e) => handleDrop(e, block.id)}
+          className={`block-editor-item transition-all duration-150 ${
+            draggedBlockId === block.id ? 'opacity-50 cursor-grabbing' : ''
+          } ${
+            dragOverBlockId === block.id ? 'border-t-2 border-blue-400 bg-blue-50' : ''
+          }`}
           style={{ 
-            border: 'none', 
+            border: dragOverBlockId === block.id ? 'none' : 'none', 
             outline: 'none',
             boxShadow: 'none',
           }}

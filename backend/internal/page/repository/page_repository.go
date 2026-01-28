@@ -35,7 +35,6 @@ func (r *pageRepository) Create(ctx context.Context, page *model.Page) error {
 func (r *pageRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.Page, error) {
 	var page *model.Page
 	err := r.db.WithContext(ctx).
-		Preload("Blocks").
 		Where("id = ?", id).
 		First(&page).Error
 	if err != nil {
