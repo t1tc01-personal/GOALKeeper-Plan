@@ -9,7 +9,7 @@ import (
 )
 
 // NewRouter registers workspace, page, block, and sharing-related routes under the given base group.
-func NewRouter(baseRouter interface{}, workspaceController controller.WorkspaceController, pageCtl pageController.PageController, blockCtl blockController.BlockController, sharingCtl controller.SharingController) {
+func NewRouter(baseRouter interface{}, workspaceController controller.WorkspaceController, pageCtl pageController.PageController, blockCtl blockController.BlockController, sharingCtl controller.SharingController, authMiddleware gin.HandlerFunc) {
 	group, ok := baseRouter.(*gin.RouterGroup)
 	if !ok {
 		return
@@ -17,6 +17,7 @@ func NewRouter(baseRouter interface{}, workspaceController controller.WorkspaceC
 
 	// Workspace routes (protected - require auth)
 	workspaces := group.Group("/notion/workspaces")
+	workspaces.Use(authMiddleware) // Apply auth middleware to all workspace routes
 	{
 		workspaces.GET("", workspaceController.ListWorkspaces)
 		workspaces.POST("", workspaceController.CreateWorkspace)
@@ -25,8 +26,9 @@ func NewRouter(baseRouter interface{}, workspaceController controller.WorkspaceC
 		workspaces.DELETE("/:id", workspaceController.DeleteWorkspace)
 	}
 
-	// Page routes
+	// Page routes (protected - require auth)
 	pages := group.Group("/notion/pages")
+	pages.Use(authMiddleware) // Apply auth middleware to all page routes
 	{
 		pages.GET("", pageCtl.ListPages)
 		pages.POST("", pageCtl.CreatePage)
@@ -40,8 +42,9 @@ func NewRouter(baseRouter interface{}, workspaceController controller.WorkspaceC
 		pages.DELETE("/:id/share/:user_id", sharingCtl.RevokeAccess)
 	}
 
-	// Block routes
+	// Block routes (protected - require auth)
 	blocks := group.Group("/notion/blocks")
+	blocks.Use(authMiddleware) // Apply auth middleware to all block routes
 	{
 		blocks.GET("", blockCtl.ListBlocks)
 		blocks.POST("", blockCtl.CreateBlock)

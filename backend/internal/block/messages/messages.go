@@ -12,6 +12,7 @@ const (
 	// Error messages
 	MsgBlockNotFound         = "Block not found"
 	MsgInvalidBlockID        = "Invalid block ID"
+	MsgInvalidBlockType      = "Invalid block type"
 	MsgInvalidPageID         = "Invalid page ID"
 	MsgFailedToCreateBlock   = "Failed to create block"
 	MsgFailedToUpdateBlock   = "Failed to update block"

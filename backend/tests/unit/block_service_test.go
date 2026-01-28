@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"goalkeeper-plan/internal/block/dto"
 	"goalkeeper-plan/internal/block/model"
 	"goalkeeper-plan/internal/block/service"
 
@@ -40,12 +41,36 @@ func (m *MockBlockRepository) ListByPageID(ctx context.Context, pageID uuid.UUID
 	return args.Get(0).([]*model.Block), args.Error(1)
 }
 
+func (m *MockBlockRepository) ListByPageIDWithPagination(ctx context.Context, pageID uuid.UUID, pagReq *dto.PaginationRequest) ([]*model.Block, *dto.PaginationMeta, error) {
+	args := m.Called(ctx, pageID, pagReq)
+	if args.Get(0) == nil {
+		return nil, nil, args.Error(2)
+	}
+	var meta *dto.PaginationMeta
+	if args.Get(1) != nil {
+		meta = args.Get(1).(*dto.PaginationMeta)
+	}
+	return args.Get(0).([]*model.Block), meta, args.Error(2)
+}
+
 func (m *MockBlockRepository) ListByParentBlockID(ctx context.Context, parentBlockID *uuid.UUID) ([]*model.Block, error) {
 	args := m.Called(ctx, parentBlockID)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
 	return args.Get(0).([]*model.Block), args.Error(1)
+}
+
+func (m *MockBlockRepository) ListByParentBlockIDWithPagination(ctx context.Context, parentBlockID *uuid.UUID, pagReq *dto.PaginationRequest) ([]*model.Block, *dto.PaginationMeta, error) {
+	args := m.Called(ctx, parentBlockID, pagReq)
+	if args.Get(0) == nil {
+		return nil, nil, args.Error(2)
+	}
+	var meta *dto.PaginationMeta
+	if args.Get(1) != nil {
+		meta = args.Get(1).(*dto.PaginationMeta)
+	}
+	return args.Get(0).([]*model.Block), meta, args.Error(2)
 }
 
 func (m *MockBlockRepository) Update(ctx context.Context, block *model.Block) error {
@@ -180,7 +205,7 @@ func TestBlockServiceGetSuccess(t *testing.T) {
 		TypeID:   uuid.New(),
 		Content:  nil,
 		Rank:     0,
-		Metadata: make(map[string]any),
+		Metadata: make(model.JSONBMap),
 	}
 
 	mockRepo.On("GetByID", ctx, blockID).Return(expected, nil)

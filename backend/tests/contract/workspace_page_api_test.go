@@ -5,8 +5,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"goalkeeper-plan/config"
 	apiRouter "goalkeeper-plan/cmd/api"
+	"goalkeeper-plan/config"
 	"goalkeeper-plan/internal/logger"
 
 	"github.com/stretchr/testify/require"
@@ -51,4 +51,3 @@ func TestWorkspacePageAPIContract(t *testing.T) {
 		})
 	}
 }
-

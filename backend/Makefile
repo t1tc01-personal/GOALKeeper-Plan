@@ -33,7 +33,11 @@ migrate-apply:
 		echo "Error: POSTGRES_CONNECTION_STRING not set in .env file"; \
 		exit 1; \
 	fi
-	atlas migrate apply --env local --url "$(POSTGRES_CONNECTION_STRING)"
+	@echo "Applying migrations..."
+	@atlas migrate apply --env local --url "$(POSTGRES_CONNECTION_STRING)" || \
+		(echo "Migration command exited with error. Checking status..." && \
+		 atlas migrate status --env local --url "$(POSTGRES_CONNECTION_STRING)" && \
+		 exit 1)
 
 .PHONY: migrate-status
 migrate-status:

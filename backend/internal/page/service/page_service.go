@@ -63,7 +63,7 @@ func (s *pageService) CreatePage(ctx context.Context, workspaceID uuid.UUID, tit
 		WorkspaceID:  workspaceID,
 		Title:        title,
 		ParentPageID: parentPageID,
-		ViewConfig:   make(map[string]any),
+		ViewConfig:   make(model.JSONBMap),
 	}
 
 	if err := s.repo.Create(ctx, page); err != nil {
@@ -135,7 +135,7 @@ func (s *pageService) UpdatePage(ctx context.Context, id uuid.UUID, title string
 
 	page.Title = title
 	if viewConfig != nil {
-		page.ViewConfig = viewConfig
+		page.ViewConfig = model.JSONBMap(viewConfig)
 	}
 
 	if err := s.repo.Update(ctx, page); err != nil {

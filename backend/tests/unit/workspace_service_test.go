@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"goalkeeper-plan/internal/block/dto"
 	"goalkeeper-plan/internal/workspace/model"
 	"goalkeeper-plan/internal/workspace/service"
 
@@ -40,6 +41,18 @@ func (m *MockWorkspaceRepository) List(ctx context.Context) ([]*model.Workspace,
 	return args.Get(0).([]*model.Workspace), args.Error(1)
 }
 
+func (m *MockWorkspaceRepository) ListWithPagination(ctx context.Context, pagReq *dto.PaginationRequest) ([]*model.Workspace, *dto.PaginationMeta, error) {
+	args := m.Called(ctx, pagReq)
+	if args.Get(0) == nil {
+		return nil, nil, args.Error(2)
+	}
+	var meta *dto.PaginationMeta
+	if args.Get(1) != nil {
+		meta = args.Get(1).(*dto.PaginationMeta)
+	}
+	return args.Get(0).([]*model.Workspace), meta, args.Error(2)
+}
+
 func (m *MockWorkspaceRepository) Update(ctx context.Context, ws *model.Workspace) error {
 	args := m.Called(ctx, ws)
 	return args.Error(0)
@@ -63,19 +76,20 @@ func TestWorkspaceServiceCreateSuccess(t *testing.T) {
 	require.NotNil(t, svc)
 
 	ctx := context.Background()
+	ownerID := uuid.New()
 	name := "Test Workspace"
 	desc := "Test description"
 
 	// Expect
 	mockRepo.On("Create", ctx, mock.MatchedBy(func(ws *model.Workspace) bool {
-		return ws.Name == name && ws.Description == &desc
+		return ws.OwnerID == ownerID && ws.Name == name && ws.Description == &desc
 	})).Run(func(args mock.Arguments) {
 		ws := args.Get(1).(*model.Workspace)
 		ws.ID = uuid.New() // Simulate ID generation by repo
 	}).Return(nil)
 
 	// Execute
-	result, err := svc.CreateWorkspace(ctx, name, &desc)
+	result, err := svc.CreateWorkspace(ctx, ownerID, name, &desc)
 
 	// Assert
 	assert.NoError(t, err)
@@ -96,9 +110,10 @@ func TestWorkspaceServiceCreateValidationError(t *testing.T) {
 	)
 
 	ctx := context.Background()
+	ownerID := uuid.New()
 
 	// Execute with empty name
-	result, err := svc.CreateWorkspace(ctx, "", nil)
+	result, err := svc.CreateWorkspace(ctx, ownerID, "", nil)
 
 	// Assert
 	assert.Error(t, err)
@@ -116,13 +131,14 @@ func TestWorkspaceServiceCreateRepositoryError(t *testing.T) {
 	)
 
 	ctx := context.Background()
+	ownerID := uuid.New()
 	name := "Test Workspace"
 
 	// Expect repository error
 	mockRepo.On("Create", ctx, mock.Anything).Return(errors.New("database error"))
 
 	// Execute
-	result, err := svc.CreateWorkspace(ctx, name, nil)
+	result, err := svc.CreateWorkspace(ctx, ownerID, name, nil)
 
 	// Assert
 	assert.Error(t, err)

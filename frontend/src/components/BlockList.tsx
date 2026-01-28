@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Card } from './ui/card';
 import { BlockEditor } from './BlockEditor';
 import { blockApi, type Block as ApiBlock } from '@/services/blockApi';
@@ -46,7 +46,7 @@ export function BlockList({ pageId }: BlockListProps) {
       setError(null);
       const newBlock = await blockApi.createBlock({
         pageId: pageId,
-        type: 'paragraph',
+        type: 'text', // Use 'text' block type from backend
         content: newBlockContent,
         position: blocks.length,
       });
@@ -117,8 +117,20 @@ export function BlockList({ pageId }: BlockListProps) {
     );
   }
 
+  // Create refs map for block navigation
+  const blockRefsMap = useRef<Map<string, HTMLDivElement>>(new Map());
+
   return (
-    <section className="space-y-4">
+    <section 
+      className="space-y-4"
+      role="region"
+      aria-label="Page content blocks"
+      aria-describedby="block-list-help"
+    >
+      <div id="block-list-help" className="sr-only">
+        Content blocks for this page. Use arrow keys to navigate between blocks when editing.
+        Drag blocks to reorder them.
+      </div>
       {error && (
         <div className="p-3 bg-red-50 text-red-700 text-sm rounded flex justify-between items-center">
           <span>{error}</span>
@@ -143,30 +155,72 @@ export function BlockList({ pageId }: BlockListProps) {
         </Card>
       )}
 
-      {blocks.map((block, index) => (
-        <div
-          key={block.id}
-          draggable
-          onDragStart={() => handleDragStart(index)}
-          onDragOver={handleDragOver}
-          onDrop={() => handleDrop(index)}
-          className={`transition-opacity ${draggedIndex === index ? 'opacity-50' : 'opacity-100'}`}
-        >
-          <div className="flex gap-2 group">
-            <div className="cursor-grab active:cursor-grabbing pt-3 text-gray-400">
-              ⋮⋮
-            </div>
-            <div className="flex-1">
-              <BlockEditor
-                block={block}
-                onUpdate={handleUpdateBlock}
-                onDelete={handleDeleteBlock}
-                onSaveError={handleBlockError}
-              />
+      {blocks.map((block, index) => {
+        const handleFocusPrevious = () => {
+          if (index > 0) {
+            const prevBlockId = blocks[index - 1].id;
+            const prevBlockElement = blockRefsMap.current.get(prevBlockId);
+            if (prevBlockElement) {
+              const editableElement = prevBlockElement.querySelector<HTMLElement>('[role="button"], textarea, input');
+              editableElement?.focus();
+            }
+          }
+        };
+
+        const handleFocusNext = () => {
+          if (index < blocks.length - 1) {
+            const nextBlockId = blocks[index + 1].id;
+            const nextBlockElement = blockRefsMap.current.get(nextBlockId);
+            if (nextBlockElement) {
+              const editableElement = nextBlockElement.querySelector<HTMLElement>('[role="button"], textarea, input');
+              editableElement?.focus();
+            }
+          }
+        };
+
+        return (
+          <div
+            key={block.id}
+            ref={(el) => {
+              if (el) blockRefsMap.current.set(block.id, el);
+            }}
+            draggable
+            onDragStart={() => handleDragStart(index)}
+            onDragOver={handleDragOver}
+            onDrop={() => handleDrop(index)}
+            className={`transition-opacity ${draggedIndex === index ? 'opacity-50' : 'opacity-100'}`}
+          >
+            <div className="flex gap-2 group">
+              <div 
+                className="cursor-grab active:cursor-grabbing pt-3 text-gray-400"
+                aria-label={`Drag to reorder block ${index + 1}`}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    // Trigger drag (simplified - full implementation would use drag API)
+                  }
+                }}
+              >
+                ⋮⋮
+              </div>
+              <div className="flex-1">
+                <BlockEditor
+                  block={block}
+                  onUpdate={handleUpdateBlock}
+                  onDelete={handleDeleteBlock}
+                  onSaveError={handleBlockError}
+                  blockIndex={index}
+                  totalBlocks={blocks.length}
+                  onFocusPrevious={index > 0 ? handleFocusPrevious : undefined}
+                  onFocusNext={index < blocks.length - 1 ? handleFocusNext : undefined}
+                />
+              </div>
             </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
 
       <form onSubmit={handleAddBlock} className="mt-4 pt-4 border-t">
         <textarea

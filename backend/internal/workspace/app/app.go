@@ -2,6 +2,8 @@ package app
 
 import (
 	"goalkeeper-plan/config"
+	"goalkeeper-plan/internal/auth/jwt"
+	authMiddleware "goalkeeper-plan/internal/auth/middleware"
 	blockController "goalkeeper-plan/internal/block/controller"
 	blockRepository "goalkeeper-plan/internal/block/repository"
 	blockService "goalkeeper-plan/internal/block/service"
@@ -20,9 +22,19 @@ import (
 // NewApplication wires the workspace module following the internal/*
 // pattern (repository -> service -> controller -> router).
 func NewApplication(db *gorm.DB, baseRouter interface{}, configs config.Configurations, log logger.Logger) {
+	// Initialize JWT service for auth middleware
+	jwtService := jwt.NewJWTService(
+		configs.AuthConfig.Secret,
+		configs.AuthConfig.JWTExpiration,
+		configs.AuthConfig.RefreshExpiration,
+	)
+
+	// Create auth middleware
+	authMw := authMiddleware.AuthMiddleware(jwtService, log)
 	workspaceRepo := repository.NewWorkspaceRepository(db)
 	pageRepo := pageRepository.NewPageRepository(db)
 	blockRepo := blockRepository.NewBlockRepository(db)
+	blockTypeRepo := blockRepository.NewBlockTypeRepository(db)
 	sharingPermRepo := repository.NewSharePermissionRepository(db)
 
 	workspaceService, err := service.NewWorkspaceService(
@@ -45,6 +57,7 @@ func NewApplication(db *gorm.DB, baseRouter interface{}, configs config.Configur
 
 	blockSvc, err := blockService.NewBlockService(
 		blockService.WithBlockRepository(blockRepo),
+		blockService.WithBlockTypeRepository(blockTypeRepo),
 		blockService.WithBlockLogger(log),
 	)
 	if err != nil {
@@ -66,5 +79,5 @@ func NewApplication(db *gorm.DB, baseRouter interface{}, configs config.Configur
 	blockCtl := blockController.NewBlockController(blockSvc, pageSvc, log)
 	sharingCtl := controller.NewSharingController(sharingSvc)
 
-	router.NewRouter(baseRouter, workspaceController, pageCtl, blockCtl, sharingCtl)
+	router.NewRouter(baseRouter, workspaceController, pageCtl, blockCtl, sharingCtl, authMw)
 }

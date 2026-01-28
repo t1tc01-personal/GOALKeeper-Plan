@@ -147,8 +147,8 @@
 - [x] T048 Security hardening for authorization checks and data exposure in `backend/src/` to support SC-004 and overall reliability targets
 - [x] T049 Run quickstart validation flow and fix any observed UX or reliability issues to validate SC-001 and SC-003 as described in `specs/001-notion-like-app/quickstart.md`
 - [x] T052 [P] Implement accessibility improvements (keyboard navigation, ARIA labels, contrast) for workspace sidebar and page views in `frontend/src/components/` and `frontend/src/pages/`
-- [ ] T053 [P] Implement accessibility improvements and basic a11y checks for block editor interactions in `frontend/src/components/BlockEditor.tsx`
-- [ ] T054 [P] Add backend metrics collection for page load latency, error rates, and permission failures in `backend/src/` and expose them to monitoring
+- [x] T053 [P] Implement accessibility improvements and basic a11y checks for block editor interactions in `frontend/src/components/BlockEditor.tsx`
+- [x] T054 [P] Add backend metrics collection for page load latency, error rates, and permission failures in `backend/src/` and expose them to monitoring
 
 ---
 

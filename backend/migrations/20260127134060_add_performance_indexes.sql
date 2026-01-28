@@ -20,11 +20,18 @@ CREATE INDEX IF NOT EXISTS idx_workspaces_owner_id_created ON workspaces(owner_i
 WHERE deleted_at IS NULL;
 
 -- Share permissions: Optimize permission lookups
-CREATE INDEX IF NOT EXISTS idx_share_permissions_page_user ON share_permissions(page_id, user_id) 
-WHERE deleted_at IS NULL;
+-- Note: These indexes are created only if the share_permissions table exists
+-- The table is created in a separate migration (20260127134059_add_share_permissions_table.sql)
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'share_permissions') THEN
+        CREATE INDEX IF NOT EXISTS idx_share_permissions_page_user ON share_permissions(page_id, user_id) 
+        WHERE deleted_at IS NULL;
 
-CREATE INDEX IF NOT EXISTS idx_share_permissions_user_created ON share_permissions(user_id, created_at DESC) 
-WHERE deleted_at IS NULL;
+        CREATE INDEX IF NOT EXISTS idx_share_permissions_user_created ON share_permissions(user_id, created_at DESC) 
+        WHERE deleted_at IS NULL;
+    END IF;
+END $$;
 
 -- Block type lookups
 CREATE INDEX IF NOT EXISTS idx_block_types_name ON block_types(name);

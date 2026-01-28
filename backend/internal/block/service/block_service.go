@@ -16,6 +16,7 @@ import (
 
 type BlockService interface {
 	CreateBlock(ctx context.Context, pageID uuid.UUID, blockType *model.BlockType, content *string, position int64) (*model.Block, error)
+	GetBlockTypeByName(ctx context.Context, name string) (*model.BlockType, error)
 	GetBlock(ctx context.Context, id uuid.UUID) (*model.Block, error)
 	ListBlocksByPage(ctx context.Context, pageID uuid.UUID) ([]*model.Block, error)
 	ListBlocksByPageWithPagination(ctx context.Context, pageID uuid.UUID, pagReq *dto.PaginationRequest) ([]*model.Block, *dto.PaginationMeta, error)
@@ -27,9 +28,10 @@ type BlockService interface {
 }
 
 type blockService struct {
-	repo      repository.BlockRepository
-	cacheServ cache.CacheService
-	logger    logger.Logger
+	repo          repository.BlockRepository
+	blockTypeRepo repository.BlockTypeRepository
+	cacheServ     cache.CacheService
+	logger        logger.Logger
 }
 
 type BlockServiceOption func(*blockService)
@@ -37,6 +39,12 @@ type BlockServiceOption func(*blockService)
 func WithBlockRepository(r repository.BlockRepository) BlockServiceOption {
 	return func(s *blockService) {
 		s.repo = r
+	}
+}
+
+func WithBlockTypeRepository(r repository.BlockTypeRepository) BlockServiceOption {
+	return func(s *blockService) {
+		s.blockTypeRepo = r
 	}
 }
 
@@ -75,7 +83,7 @@ func (s *blockService) CreateBlock(ctx context.Context, pageID uuid.UUID, blockT
 		TypeID:   blockType.ID,
 		Content:  content,
 		Rank:     position,
-		Metadata: make(map[string]any),
+		Metadata: make(model.JSONBMap),
 	}
 
 	if err := s.repo.Create(ctx, block); err != nil {
@@ -85,6 +93,13 @@ func (s *blockService) CreateBlock(ctx context.Context, pageID uuid.UUID, blockT
 
 	logger.LogServiceSuccess(s.logger, "create_block", zap.String("id", block.ID.String()))
 	return block, nil
+}
+
+func (s *blockService) GetBlockTypeByName(ctx context.Context, name string) (*model.BlockType, error) {
+	if s.blockTypeRepo == nil {
+		return nil, fmt.Errorf("block type repository not initialized")
+	}
+	return s.blockTypeRepo.GetByName(ctx, name)
 }
 
 func (s *blockService) GetBlock(ctx context.Context, id uuid.UUID) (*model.Block, error) {

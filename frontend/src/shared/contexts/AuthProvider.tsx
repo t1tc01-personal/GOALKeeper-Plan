@@ -5,11 +5,9 @@ import { authApi } from '@/features/auth/api/authApi'
 import { clearAuthCookieClient } from '../lib/authCookieClient'
 import { EMPLOYEE_ROLE, RoleEmployee } from '../constant/permission'
 import { toast } from 'sonner'
+import { User } from '@/shared/types/auth'
 
-interface User {
-  id: string
-  email: string
-  name: string
+interface UserWithRoles extends User {
   roles?: string[]
 }
 
@@ -76,7 +74,8 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [clearAuth])
 
-  const role = useMemo(() => getRole(user?.roles), [user?.roles])
+  const userWithRoles = user as UserWithRoles | null
+  const role = useMemo(() => getRole(userWithRoles?.roles), [userWithRoles?.roles])
 
   return (
     <AuthContext.Provider

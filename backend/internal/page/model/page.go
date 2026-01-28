@@ -1,10 +1,48 @@
 package model
 
 import (
+	"database/sql/driver"
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+// JSONBMap is a custom type for handling JSONB fields in PostgreSQL
+type JSONBMap map[string]any
+
+// Value implements the driver.Valuer interface for JSONBMap
+func (j JSONBMap) Value() (driver.Value, error) {
+	if j == nil {
+		return []byte("{}"), nil
+	}
+	return json.Marshal(j)
+}
+
+// Scan implements the sql.Scanner interface for JSONBMap
+func (j *JSONBMap) Scan(value interface{}) error {
+	if value == nil {
+		*j = make(JSONBMap)
+		return nil
+	}
+
+	var bytes []byte
+	switch v := value.(type) {
+	case []byte:
+		bytes = v
+	case string:
+		bytes = []byte(v)
+	default:
+		bytes = []byte("{}")
+	}
+
+	if len(bytes) == 0 {
+		*j = make(JSONBMap)
+		return nil
+	}
+
+	return json.Unmarshal(bytes, j)
+}
 
 // Page represents a page inside a workspace and supports hierarchy.
 type Page struct {
@@ -17,7 +55,7 @@ type Page struct {
 	IsPlanner   bool       `gorm:"column:is_planner;default:false;index"`
 	FrameworkID *uuid.UUID `gorm:"type:uuid;index"`
 
-	ViewConfig map[string]any `gorm:"type:jsonb;default:'{}'::jsonb"`
+	ViewConfig JSONBMap `gorm:"type:jsonb;default:'{}'::jsonb"`
 
 	CreatedAt time.Time  `gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt time.Time  `gorm:"column:updated_at;autoUpdateTime"`

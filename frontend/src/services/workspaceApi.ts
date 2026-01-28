@@ -1,5 +1,38 @@
 // Workspace API client for frontend
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api/v1';
+import { getAuthTokenClient } from '@/shared/lib/authCookieClient';
+import { useAuthStore } from '@/features/auth/store/authStore';
+
+// Get API URL at runtime to ensure environment variables are available
+// Automatically appends /api/v1 if not already present
+function getApiBaseUrl(): string {
+  const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+  // Remove trailing slash if present
+  const cleanBaseUrl = baseUrl.replace(/\/$/, '');
+  // Append /api/v1 if not already present
+  if (!cleanBaseUrl.endsWith('/api/v1')) {
+    return `${cleanBaseUrl}/api/v1`;
+  }
+  return cleanBaseUrl;
+}
+
+const API_BASE_URL = getApiBaseUrl();
+
+// Helper to get authentication token
+function getAuthToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  
+  // Try to get from cookie first (preferred method)
+  const cookieToken = getAuthTokenClient();
+  if (cookieToken) return cookieToken;
+  
+  // Fallback to auth store
+  try {
+    const authStore = useAuthStore.getState();
+    return authStore.accessToken;
+  } catch (e) {
+    return null;
+  }
+}
 
 export interface Workspace {
   id: string;
@@ -67,19 +100,82 @@ class WorkspaceApiClient {
     endpoint: string,
     options: RequestInit = {}
   ): Promise<ApiResponse<T>> {
-    const url = `${this.baseUrl}${endpoint}`;
+    // Ensure endpoint starts with / if baseUrl doesn't end with /
+    const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+    // Get baseUrl at runtime to ensure it's correct
+    const baseUrl = this.baseUrl || getApiBaseUrl();
+    const url = `${baseUrl}${cleanEndpoint}`;
+    
+    // Debug logging (remove in production)
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[API Request]', options.method || 'GET', url);
+      console.log('[API Base URL]', baseUrl);
+      console.log('[API Endpoint]', cleanEndpoint);
+    }
+    
+    // Build headers
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    
+    // Merge existing headers if provided
+    if (options.headers) {
+      if (options.headers instanceof Headers) {
+        options.headers.forEach((value, key) => {
+          headers[key] = value;
+        });
+      } else if (Array.isArray(options.headers)) {
+        options.headers.forEach(([key, value]) => {
+          if (key && value) {
+            headers[String(key)] = String(value);
+          }
+        });
+      } else {
+        // Handle Record<string, string> or HeadersInit object
+        const headerObj = options.headers as Record<string, string>;
+        Object.keys(headerObj).forEach(key => {
+          if (headerObj[key]) {
+            headers[key] = String(headerObj[key]);
+          }
+        });
+      }
+    }
+    
+    // Add Authorization header with Bearer token
+    const token = getAuthToken();
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[API Auth] Token included in request');
+      }
+    } else {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[API Auth] No token found - request may fail with 401');
+      }
+    }
+    
+    // Try to get user ID from auth store for X-User-ID header (if needed by backend)
+    if (typeof window !== 'undefined') {
+      try {
+        const authStore = useAuthStore.getState();
+        const userId = authStore?.user?.id;
+        if (userId) {
+          headers['X-User-ID'] = String(userId);
+        }
+      } catch (e) {
+        // Ignore errors
+      }
+    }
+    
     const response = await fetch(url, {
       ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...options.headers,
-      },
+      headers: headers as HeadersInit,
     });
 
     const data = await response.json() as ApiResponse<T>;
     
-    if (!response.ok) {
-      throw new Error(data.error?.message || 'API request failed');
+    if (!response.ok || !data.success) {
+      throw new Error(data.error?.message || data.message || 'API request failed');
     }
 
     return data;
@@ -122,7 +218,11 @@ class WorkspaceApiClient {
   async createPage(req: CreatePageRequest): Promise<Page> {
     const response = await this.request<Page>('/notion/pages', {
       method: 'POST',
-      body: JSON.stringify(req),
+      body: JSON.stringify({
+        workspaceId: req.workspaceId,  // Backend expects camelCase
+        title: req.title,
+        parentPageId: req.parentPageId,  // Backend expects camelCase
+      }),
     });
     return response.data!;
   }
@@ -190,6 +290,7 @@ class WorkspaceApiClient {
   }
 }
 
-// Export a singleton instance
-export const workspaceApi = new WorkspaceApiClient();
+// Export a singleton instance with explicit base URL
+// This ensures the base URL is always correct, even if env vars aren't loaded yet
+export const workspaceApi = new WorkspaceApiClient(getApiBaseUrl());
 export default workspaceApi;

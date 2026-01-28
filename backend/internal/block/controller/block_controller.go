@@ -4,7 +4,6 @@ import (
 	"goalkeeper-plan/internal/api"
 	"goalkeeper-plan/internal/block/dto"
 	blockMessages "goalkeeper-plan/internal/block/messages"
-	"goalkeeper-plan/internal/block/model"
 	"goalkeeper-plan/internal/block/service"
 	"goalkeeper-plan/internal/errors"
 	"goalkeeper-plan/internal/logger"
@@ -51,9 +50,15 @@ func (c *blockController) CreateBlock(ctx *gin.Context) {
 			)
 		}
 
-		blockType := &model.BlockType{
-			ID:   uuid.New(),
-			Name: req.Type,
+		// Look up block type by name from database
+		blockType, err := c.blockService.GetBlockTypeByName(ctx, req.Type)
+		if err != nil {
+			c.logger.Error("Failed to get block type", zap.Error(err), zap.String("type", req.Type))
+			return nil, errors.NewValidationError(
+				errors.CodeInvalidID,
+				blockMessages.MsgInvalidBlockType,
+				err,
+			)
 		}
 
 		var content *string

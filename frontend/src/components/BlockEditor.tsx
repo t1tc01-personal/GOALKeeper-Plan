@@ -8,9 +8,26 @@ interface BlockEditorProps {
   onUpdate: (block: Block) => void;
   onDelete: (blockId: string) => void;
   onSaveError: (error: string) => void;
+  /** Optional: Block index for keyboard navigation between blocks */
+  blockIndex?: number;
+  /** Optional: Total number of blocks for navigation announcements */
+  totalBlocks?: number;
+  /** Optional: Callback when block requests focus to previous block */
+  onFocusPrevious?: () => void;
+  /** Optional: Callback when block requests focus to next block */
+  onFocusNext?: () => void;
 }
 
-export function BlockEditor({ block, onUpdate, onDelete, onSaveError }: BlockEditorProps) {
+export function BlockEditor({ 
+  block, 
+  onUpdate, 
+  onDelete, 
+  onSaveError,
+  blockIndex,
+  totalBlocks,
+  onFocusPrevious,
+  onFocusNext,
+}: BlockEditorProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [content, setContent] = useState(block.content || '');
   const [isSaving, setIsSaving] = useState(false);
@@ -55,6 +72,30 @@ export function BlockEditor({ block, onUpdate, onDelete, onSaveError }: BlockEdi
       return;
     }
 
+    // Arrow Up: Navigate to previous block (when not editing or at start of content)
+    if (e.key === 'ArrowUp' && !isEditing && onFocusPrevious) {
+      const input = e.currentTarget;
+      if (input.selectionStart === 0 && input.selectionEnd === 0) {
+        e.preventDefault();
+        onFocusPrevious();
+        announceToScreenReader(`Navigated to previous block. Block ${blockIndex} of ${totalBlocks || '?'}.`);
+        return;
+      }
+    }
+
+    // Arrow Down: Navigate to next block (when not editing or at end of content)
+    if (e.key === 'ArrowDown' && !isEditing && onFocusNext) {
+      const input = e.currentTarget;
+      const isAtEnd = input.selectionStart === input.value.length && input.selectionEnd === input.value.length;
+      if (isAtEnd) {
+        e.preventDefault();
+        onFocusNext();
+        const nextIndex = blockIndex !== undefined ? blockIndex + 2 : undefined;
+        announceToScreenReader(`Navigated to next block. Block ${nextIndex} of ${totalBlocks || '?'}.`);
+        return;
+      }
+    }
+
     // Ctrl/Cmd + B: Bold (announcement for screen readers)
     if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
       e.preventDefault();
@@ -68,7 +109,7 @@ export function BlockEditor({ block, onUpdate, onDelete, onSaveError }: BlockEdi
       announceToScreenReader('Italic formatting applied. Note: This editor stores plain text.');
       return;
     }
-  }, [block.content]);
+  }, [block.content, isEditing, blockIndex, totalBlocks, onFocusPrevious, onFocusNext]);
 
   // Helper to announce messages to screen readers
   const announceToScreenReader = (message: string) => {
@@ -93,7 +134,7 @@ export function BlockEditor({ block, onUpdate, onDelete, onSaveError }: BlockEdi
     try {
       setIsSaving(true);
       setError(null);
-      announceToScreenReader(`Saving ${block.type_id}...`);
+      announceToScreenReader(`Saving ${blockType}...`);
 
       const updateReq: UpdateBlockRequest = {
         content: content || undefined,
@@ -102,35 +143,35 @@ export function BlockEditor({ block, onUpdate, onDelete, onSaveError }: BlockEdi
       const updatedBlock = await blockApi.updateBlock(block.id, updateReq);
       onUpdate(updatedBlock);
       setIsEditing(false);
-      announceToScreenReader(`${block.type_id} saved successfully.`);
+      announceToScreenReader(`${blockType} saved successfully.`);
       contentDisplayRef.current?.focus();
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Failed to save block';
       setError(errorMsg);
       onSaveError(errorMsg);
-      announceToScreenReader(`Error saving ${block.type_id}: ${errorMsg}`);
+      announceToScreenReader(`Error saving ${blockType}: ${errorMsg}`);
     } finally {
       setIsSaving(false);
     }
   };
 
   const handleDelete = async () => {
-    if (!confirm(`Are you sure you want to delete this ${block.type_id}? This action cannot be undone.`)) {
+    if (!confirm(`Are you sure you want to delete this ${blockType}? This action cannot be undone.`)) {
       announceToScreenReader('Delete cancelled.');
       return;
     }
 
     try {
       setIsSaving(true);
-      announceToScreenReader(`Deleting ${block.type_id}...`);
+      announceToScreenReader(`Deleting ${blockType}...`);
       await blockApi.deleteBlock(block.id);
       onDelete(block.id);
-      announceToScreenReader(`${block.type_id} deleted successfully.`);
+      announceToScreenReader(`${blockType} deleted successfully.`);
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Failed to delete block';
       setError(errorMsg);
       onSaveError(errorMsg);
-      announceToScreenReader(`Error deleting ${block.type_id}: ${errorMsg}`);
+      announceToScreenReader(`Error deleting ${blockType}: ${errorMsg}`);
     } finally {
       setIsSaving(false);
     }
@@ -139,20 +180,35 @@ export function BlockEditor({ block, onUpdate, onDelete, onSaveError }: BlockEdi
   const renderBlockContent = () => {
     const baseClass = 'w-full min-h-[2rem] px-3 py-2 rounded border border-gray-200 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-0 transition-colors';
 
+    // Get block type (normalize from backend response)
+    const currentBlockType = block.type_id || block.type || 'text';
+
     const blockTypeLabel = {
-      heading: 'Block heading',
-      paragraph: 'Block paragraph',
-      checklist: 'Block checklist item',
-    }[block.type_id] || 'Block content';
+      text: 'Text block',
+      heading_1: 'Heading 1 block',
+      heading_2: 'Heading 2 block',
+      heading_3: 'Heading 3 block',
+      todo_list: 'Todo list block',
+      bulleted_list: 'Bulleted list block',
+      numbered_list: 'Numbered list block',
+    }[currentBlockType] || 'Content block';
 
     const blockTypeInstructions = {
-      heading: 'Edit heading. Press Ctrl+Enter to save, Escape to cancel.',
-      paragraph: 'Edit paragraph. Press Ctrl+Enter to save, Escape to cancel.',
-      checklist: 'Edit checklist item. Press Ctrl+Enter to save, Escape to cancel.',
-    }[block.type_id] || 'Edit block content. Press Ctrl+Enter to save, Escape to cancel.';
+      text: 'Edit text. Press Ctrl+Enter to save, Escape to cancel.',
+      heading_1: 'Edit heading 1. Press Ctrl+Enter to save, Escape to cancel.',
+      heading_2: 'Edit heading 2. Press Ctrl+Enter to save, Escape to cancel.',
+      heading_3: 'Edit heading 3. Press Ctrl+Enter to save, Escape to cancel.',
+      todo_list: 'Edit todo item. Press Ctrl+Enter to save, Escape to cancel.',
+      bulleted_list: 'Edit bulleted list item. Press Ctrl+Enter to save, Escape to cancel.',
+      numbered_list: 'Edit numbered list item. Press Ctrl+Enter to save, Escape to cancel.',
+    }[currentBlockType] || 'Edit block content. Press Ctrl+Enter to save, Escape to cancel.';
 
-    switch (block.type_id) {
-      case 'heading':
+    switch (currentBlockType) {
+      case 'heading_1':
+      case 'heading_2':
+      case 'heading_3':
+        const headingLevel = currentBlockType === 'heading_1' ? 1 : currentBlockType === 'heading_2' ? 2 : 3;
+        const headingSize = headingLevel === 1 ? 'text-3xl' : headingLevel === 2 ? 'text-2xl' : 'text-xl';
         return (
           isEditing ? (
             <div>
@@ -167,7 +223,7 @@ export function BlockEditor({ block, onUpdate, onDelete, onSaveError }: BlockEdi
                 onChange={e => setContent(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="Heading..."
-                className={`${baseClass} text-xl font-bold`}
+                className={`${baseClass} ${headingSize} font-bold`}
                 aria-label={blockTypeLabel}
                 aria-describedby={`heading-instructions-${block.id}`}
                 disabled={isSaving}
@@ -188,8 +244,8 @@ export function BlockEditor({ block, onUpdate, onDelete, onSaveError }: BlockEdi
               }}
               role="button"
               tabIndex={0}
-              className="text-xl font-bold cursor-pointer hover:bg-gray-100 px-3 py-2 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-0"
-              aria-label={`Heading: ${content || '(empty)'}`}
+              className={`${headingSize} font-bold cursor-pointer hover:bg-gray-100 px-3 py-2 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-0`}
+              aria-label={`Heading ${headingLevel}: ${content || '(empty)'}`}
               aria-describedby={`heading-edit-${block.id}`}
             >
               {content || 'Untitled heading'}
@@ -197,16 +253,70 @@ export function BlockEditor({ block, onUpdate, onDelete, onSaveError }: BlockEdi
           )
         );
 
-      case 'paragraph':
+      case 'todo_list':
+        return (
+          isEditing ? (
+            <div>
+              <label htmlFor={`todo-${block.id}`} className="sr-only">
+                {blockTypeLabel}
+              </label>
+              <input
+                id={`todo-${block.id}`}
+                ref={contentRef as React.Ref<HTMLInputElement>}
+                type="text"
+                value={content}
+                onChange={e => setContent(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Todo item..."
+                className={baseClass}
+                aria-label={blockTypeLabel}
+                aria-describedby={`todo-instructions-${block.id}`}
+                disabled={isSaving}
+              />
+              <p id={`todo-instructions-${block.id}`} className="sr-only">
+                {blockTypeInstructions}
+              </p>
+            </div>
+          ) : (
+            <label
+              ref={contentDisplayRef as React.Ref<HTMLLabelElement>}
+              className="cursor-pointer hover:bg-gray-100 px-3 py-2 rounded transition-colors flex items-center gap-2 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-0"
+              aria-label={`Todo item: ${content || '(empty)'}`}
+            >
+              <input
+                type="checkbox"
+                onClick={() => setIsEditing(true)}
+                className="w-4 h-4 focus:ring-2 focus:ring-primary"
+                aria-label={`Select todo item: ${content || '(empty)'}`}
+                disabled={isSaving}
+              />
+              <span
+                onClick={() => setIsEditing(true)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setIsEditing(true);
+                  }
+                }}
+                role="button"
+                tabIndex={0}
+              >
+                {content || 'Click to add todo item...'}
+              </span>
+            </label>
+          )
+        );
+
+      case 'text':
       default:
         return (
           isEditing ? (
             <div>
-              <label htmlFor={`paragraph-${block.id}`} className="sr-only">
+              <label htmlFor={`text-${block.id}`} className="sr-only">
                 {blockTypeLabel}
               </label>
               <textarea
-                id={`paragraph-${block.id}`}
+                id={`text-${block.id}`}
                 ref={contentRef as React.Ref<HTMLTextAreaElement>}
                 value={content}
                 onChange={e => setContent(e.target.value)}
@@ -215,10 +325,10 @@ export function BlockEditor({ block, onUpdate, onDelete, onSaveError }: BlockEdi
                 className={`${baseClass} resize-none`}
                 rows={3}
                 aria-label={blockTypeLabel}
-                aria-describedby={`paragraph-instructions-${block.id}`}
+                aria-describedby={`text-instructions-${block.id}`}
                 disabled={isSaving}
               />
-              <p id={`paragraph-instructions-${block.id}`} className="sr-only">
+              <p id={`text-instructions-${block.id}`} className="sr-only">
                 {blockTypeInstructions}
               </p>
             </div>
@@ -235,77 +345,42 @@ export function BlockEditor({ block, onUpdate, onDelete, onSaveError }: BlockEdi
               role="button"
               tabIndex={0}
               className="cursor-pointer hover:bg-gray-100 px-3 py-2 rounded transition-colors min-h-[2rem] flex items-center focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-0"
-              aria-label={`Paragraph: ${content || '(empty)'}`}
-              aria-describedby={`paragraph-edit-${block.id}`}
+              aria-label={`Text: ${content || '(empty)'}`}
+              aria-describedby={`text-edit-${block.id}`}
             >
               {content || 'Click to add text...'}
             </p>
           )
         );
-
-      case 'checklist':
-        return (
-          isEditing ? (
-            <div>
-              <label htmlFor={`checklist-${block.id}`} className="sr-only">
-                {blockTypeLabel}
-              </label>
-              <input
-                id={`checklist-${block.id}`}
-                ref={contentRef as React.Ref<HTMLInputElement>}
-                type="text"
-                value={content}
-                onChange={e => setContent(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Checklist item..."
-                className={baseClass}
-                aria-label={blockTypeLabel}
-                aria-describedby={`checklist-instructions-${block.id}`}
-                disabled={isSaving}
-              />
-              <p id={`checklist-instructions-${block.id}`} className="sr-only">
-                {blockTypeInstructions}
-              </p>
-            </div>
-          ) : (
-            <label
-              ref={contentDisplayRef as React.Ref<HTMLLabelElement>}
-              className="cursor-pointer hover:bg-gray-100 px-3 py-2 rounded transition-colors flex items-center gap-2 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-0"
-              aria-label={`Checklist item: ${content || '(empty)'}`}
-            >
-              <input
-                type="checkbox"
-                onClick={() => setIsEditing(true)}
-                className="w-4 h-4 focus:ring-2 focus:ring-primary"
-                aria-label={`Select checklist item: ${content || '(empty)'}`}
-                disabled={isSaving}
-              />
-              <span
-                onClick={() => setIsEditing(true)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    setIsEditing(true);
-                  }
-                }}
-                role="button"
-                tabIndex={0}
-              >
-                {content || 'Click to add checklist item...'}
-              </span>
-            </label>
-          )
-        );
     }
   };
+
+  // Build accessible label with position information
+  const blockPositionLabel = blockIndex !== undefined && totalBlocks !== undefined
+    ? `Block ${blockIndex + 1} of ${totalBlocks}`
+    : 'Block';
+  
+  const blockType = block.type_id || block.type || 'text';
+  const blockTypeLabel = {
+    text: 'Text block',
+    heading_1: 'Heading 1 block',
+    heading_2: 'Heading 2 block',
+    heading_3: 'Heading 3 block',
+    todo_list: 'Todo list block',
+    bulleted_list: 'Bulleted list block',
+    numbered_list: 'Numbered list block',
+  }[blockType] || 'Content block';
 
   return (
     <div
       ref={blockContainerRef}
       className="mb-2 p-2 border border-gray-100 rounded bg-white focus-within:ring-2 focus-within:ring-primary focus-within:ring-offset-0 transition-all"
-      role="region"
-      aria-label={`${block.type_id} block, created ${new Date(block.created_at).toLocaleDateString()}`}
+      role="article"
+      aria-label={`${blockTypeLabel}, ${blockPositionLabel}`}
       aria-describedby={`block-help-${block.id}`}
+      data-block-id={block.id}
+      data-block-type={blockType}
+      data-block-index={blockIndex}
     >
       {error && (
         <div
@@ -319,7 +394,17 @@ export function BlockEditor({ block, onUpdate, onDelete, onSaveError }: BlockEdi
       )}
 
       <div id={`block-help-${block.id}`} className="sr-only">
-        Block of type {block.type_id}. Double-click or press Enter to edit. Tab to navigate to buttons.
+        {blockTypeLabel}. {blockPositionLabel}. 
+        {blockIndex !== undefined && totalBlocks !== undefined && (
+          <>
+            {blockIndex > 0 && 'Press Arrow Up to navigate to previous block. '}
+            {blockIndex < totalBlocks - 1 && 'Press Arrow Down to navigate to next block. '}
+          </>
+        )}
+        Double-click or press Enter or Space to edit. 
+        Press Ctrl+Enter to save, Escape to cancel. 
+        Press Ctrl+Shift+D to delete. 
+        Tab to navigate to action buttons.
       </div>
 
       {renderBlockContent()}
@@ -331,7 +416,7 @@ export function BlockEditor({ block, onUpdate, onDelete, onSaveError }: BlockEdi
             onClick={handleSave}
             className="px-3 py-1 text-sm bg-primary text-white rounded hover:bg-primary/90 transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-0 disabled:opacity-60 disabled:cursor-not-allowed min-h-[44px] min-w-[44px]"
             disabled={isSaving}
-            aria-label={`Save ${block.type_id}`}
+            aria-label={`Save ${blockType}`}
             title="Save block (Ctrl+Enter)"
           >
             {isSaving ? 'Saving...' : 'Save'}
@@ -345,7 +430,7 @@ export function BlockEditor({ block, onUpdate, onDelete, onSaveError }: BlockEdi
             }}
             className="px-3 py-1 text-sm border rounded hover:bg-gray-100 transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-0 disabled:opacity-60 disabled:cursor-not-allowed min-h-[44px] min-w-[44px]"
             disabled={isSaving}
-            aria-label={`Cancel editing ${block.type_id}`}
+            aria-label={`Cancel editing ${blockType}`}
             title="Cancel (Escape)"
           >
             Cancel
@@ -354,7 +439,7 @@ export function BlockEditor({ block, onUpdate, onDelete, onSaveError }: BlockEdi
             onClick={handleDelete}
             className="px-3 py-1 text-sm text-red-600 hover:bg-red-50 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-0 disabled:opacity-60 disabled:cursor-not-allowed min-h-[44px] min-w-[44px]"
             disabled={isSaving}
-            aria-label={`Delete ${block.type_id}`}
+            aria-label={`Delete ${blockType}`}
             title="Delete block (Ctrl+Shift+D)"
           >
             Delete
@@ -367,7 +452,7 @@ export function BlockEditor({ block, onUpdate, onDelete, onSaveError }: BlockEdi
 
       {!isEditing && (
         <div className="mt-1 text-xs text-gray-500" aria-label="Block metadata">
-          {block.type_id} • Created {new Date(block.created_at).toLocaleDateString()}
+          {blockType} • Created {new Date(block.created_at).toLocaleDateString()}
         </div>
       )}
     </div>
