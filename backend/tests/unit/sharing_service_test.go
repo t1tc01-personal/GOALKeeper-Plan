@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"goalkeeper-plan/internal/workspace/model"
-	"goalkeeper-plan/internal/workspace/service"
+	"goalkeeper-plan/internal/sharing/model"
+	"goalkeeper-plan/internal/sharing/service"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"

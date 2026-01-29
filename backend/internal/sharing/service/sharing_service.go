@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"goalkeeper-plan/internal/logger"
-	"goalkeeper-plan/internal/workspace/model"
-	"goalkeeper-plan/internal/workspace/repository"
+	"goalkeeper-plan/internal/sharing/model"
+	"goalkeeper-plan/internal/sharing/repository"
 
 	"github.com/google/uuid"
 )
@@ -149,3 +149,5 @@ func (s *sharingService) GetUserPages(ctx context.Context, userID uuid.UUID) ([]
 
 	return perms, nil
 }
+
+

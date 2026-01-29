@@ -2,7 +2,7 @@ package repository
 
 import (
 	"context"
-	"goalkeeper-plan/internal/workspace/model"
+	"goalkeeper-plan/internal/sharing/model"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"

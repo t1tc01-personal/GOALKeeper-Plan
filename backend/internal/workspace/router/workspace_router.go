@@ -3,13 +3,14 @@ package router
 import (
 	blockController "goalkeeper-plan/internal/block/controller"
 	pageController "goalkeeper-plan/internal/page/controller"
+	sharingController "goalkeeper-plan/internal/sharing/controller"
 	"goalkeeper-plan/internal/workspace/controller"
 
 	"github.com/gin-gonic/gin"
 )
 
 // NewRouter registers workspace, page, block, and sharing-related routes under the given base group.
-func NewRouter(baseRouter interface{}, workspaceController controller.WorkspaceController, pageCtl pageController.PageController, blockCtl blockController.BlockController, sharingCtl controller.SharingController, authMiddleware gin.HandlerFunc) {
+func NewRouter(baseRouter interface{}, workspaceController controller.WorkspaceController, pageCtl pageController.PageController, blockCtl blockController.BlockController, sharingCtl sharingController.SharingController, authMiddleware gin.HandlerFunc) {
 	group, ok := baseRouter.(*gin.RouterGroup)
 	if !ok {
 		return

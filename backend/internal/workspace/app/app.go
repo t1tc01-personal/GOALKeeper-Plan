@@ -11,6 +11,9 @@ import (
 	pageController "goalkeeper-plan/internal/page/controller"
 	pageRepository "goalkeeper-plan/internal/page/repository"
 	pageService "goalkeeper-plan/internal/page/service"
+	sharingController "goalkeeper-plan/internal/sharing/controller"
+	sharingRepository "goalkeeper-plan/internal/sharing/repository"
+	sharingService "goalkeeper-plan/internal/sharing/service"
 	"goalkeeper-plan/internal/workspace/controller"
 	"goalkeeper-plan/internal/workspace/repository"
 	"goalkeeper-plan/internal/workspace/router"
@@ -35,7 +38,7 @@ func NewApplication(db *gorm.DB, baseRouter interface{}, configs config.Configur
 	pageRepo := pageRepository.NewPageRepository(db)
 	blockRepo := blockRepository.NewBlockRepository(db)
 	blockTypeRepo := blockRepository.NewBlockTypeRepository(db)
-	sharingPermRepo := repository.NewSharePermissionRepository(db)
+	sharingPermRepo := sharingRepository.NewSharePermissionRepository(db)
 
 	workspaceService, err := service.NewWorkspaceService(
 		service.WithWorkspaceRepository(workspaceRepo),
@@ -65,9 +68,9 @@ func NewApplication(db *gorm.DB, baseRouter interface{}, configs config.Configur
 		return
 	}
 
-	sharingSvc, err := service.NewSharingService(
-		service.WithSharingRepository(sharingPermRepo),
-		service.WithSharingLogger(log),
+	sharingSvc, err := sharingService.NewSharingService(
+		sharingService.WithSharingRepository(sharingPermRepo),
+		sharingService.WithSharingLogger(log),
 	)
 	if err != nil {
 		log.Fatal("failed to initialize sharing service")
@@ -77,7 +80,7 @@ func NewApplication(db *gorm.DB, baseRouter interface{}, configs config.Configur
 	workspaceController := controller.NewWorkspaceController(workspaceService, log)
 	pageCtl := pageController.NewPageController(pageSvc, log)
 	blockCtl := blockController.NewBlockController(blockSvc, pageSvc, log)
-	sharingCtl := controller.NewSharingController(sharingSvc)
+	sharingCtl := sharingController.NewSharingController(sharingSvc)
 
 	router.NewRouter(baseRouter, workspaceController, pageCtl, blockCtl, sharingCtl, authMw)
 }

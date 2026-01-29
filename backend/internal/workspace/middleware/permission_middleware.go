@@ -5,7 +5,7 @@ import (
 
 	"goalkeeper-plan/internal/metrics"
 	"goalkeeper-plan/internal/response"
-	"goalkeeper-plan/internal/workspace/service"
+	sharingService "goalkeeper-plan/internal/sharing/service"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -13,7 +13,7 @@ import (
 )
 
 // AuthorizePageEdit ensures user has edit permission for the page
-func AuthorizePageEdit(sharingService service.SharingService, metricsInstance *metrics.Metrics) gin.HandlerFunc {
+func AuthorizePageEdit(sharingService sharingService.SharingService, metricsInstance *metrics.Metrics) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
 		pageIDStr := c.Param("id")
@@ -91,7 +91,7 @@ func AuthorizePageEdit(sharingService service.SharingService, metricsInstance *m
 }
 
 // AuthorizePageRead ensures user has at least read permission for the page
-func AuthorizePageRead(sharingService service.SharingService, metricsInstance *metrics.Metrics) gin.HandlerFunc {
+func AuthorizePageRead(sharingService sharingService.SharingService, metricsInstance *metrics.Metrics) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
 		pageIDStr := c.Param("id")

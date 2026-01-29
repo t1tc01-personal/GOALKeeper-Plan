@@ -94,6 +94,19 @@ export function InlineBlockEditor({
 
   // Handle key events
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    // When slash menu is open, let SlashCommandMenu handle navigation & selection
+    if (showSlashMenu) {
+      if (e.key === 'Enter' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        // Do not trigger block-level enter / arrow navigation
+        return;
+      }
+
+      if (e.key === 'Backspace') {
+        // Avoid triggering block delete/merge while menu is open
+        return;
+      }
+    }
+
     // Ctrl+Enter or Cmd+Enter: Insert newline in same block (markdown style)
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       // Allow default behavior (insert newline/line break)

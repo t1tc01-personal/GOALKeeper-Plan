@@ -3,8 +3,8 @@ package controller
 import (
 	"fmt"
 	"goalkeeper-plan/internal/response"
-	"goalkeeper-plan/internal/workspace/model"
-	"goalkeeper-plan/internal/workspace/service"
+	"goalkeeper-plan/internal/sharing/model"
+	"goalkeeper-plan/internal/sharing/service"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
