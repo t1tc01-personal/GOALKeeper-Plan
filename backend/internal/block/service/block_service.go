@@ -96,6 +96,9 @@ func (s *blockService) CreateBlock(ctx context.Context, pageID uuid.UUID, blockT
 		return nil, err
 	}
 
+	// Manually attach BlockType so it's available in the return value
+	block.BlockType = blockType
+
 	logger.LogServiceSuccess(s.logger, "create_block", zap.String("id", block.ID.String()))
 	return block, nil
 }

@@ -23,6 +23,7 @@ export function PageEditor({ pageId }: PageEditorProps) {
   const [error, setError] = useState<string | null>(null);
   const [focusedBlockId, setFocusedBlockId] = useState<string | null>(null);
   const [pendingCreates, setPendingCreates] = useState<Map<string, Block>>(new Map());
+  const pendingCreatesRef = useRef<Map<string, Block>>(new Map()); // Ref to access latest pending blocks in callbacks
   const blockRefsMap = useRef<Map<string, HTMLDivElement>>(new Map());
   const [cursorPositions, setCursorPositions] = useState<Map<string, number>>(new Map());
   const [draggedBlockId, setDraggedBlockId] = useState<string | null>(null);
@@ -62,45 +63,82 @@ export function PageEditor({ pageId }: PageEditorProps) {
     return allBlocks.sort((a, b) => a.position - b.position);
   }, [blocks, pendingCreates]);
 
+  // Helper: Calculate list number for numbered_list by counting consecutive numbered_list blocks before current
+  const calculateListNumber = useCallback((blockId: string): number => {
+    const allBlocks = getAllBlocks();
+    const blockIndex = allBlocks.findIndex(b => b.id === blockId);
+    if (blockIndex === -1) return 1;
+
+    const currentBlock = allBlocks[blockIndex];
+    const currentType = currentBlock.type_id || currentBlock.type;
+
+    // Chỉ tính nếu là numbered_list
+    if (currentType !== 'numbered_list') return 1;
+
+    let count = 1;
+    // Count consecutive numbered_list blocks before current
+    for (let i = blockIndex - 1; i >= 0; i--) {
+      const prevType = allBlocks[i].type_id || allBlocks[i].type;
+      if (prevType === 'numbered_list') {
+        count++;
+      } else {
+        break; // Stop at first non-numbered-list block
+      }
+    }
+    return count;
+  }, [getAllBlocks]);
+
   // Handle batch sync success - update state with real block IDs
   const handleSyncSuccess = useCallback((response: BatchSyncResponse) => {
     // Process creates - map temp IDs to real IDs
     if (response.creates && response.creates.length > 0) {
       const tempToRealMap = new Map<string, string>();
-      
+
       response.creates.forEach((createResult) => {
         tempToRealMap.set(createResult.tempId, createResult.block.id);
         tempIdMapRef.current.set(createResult.tempId, createResult.block.id);
       });
 
-      // Remove temp blocks and add real blocks
+      // GIẢI PHÁP: Cập nhật tất cả state liên quan đến ID transition trong cùng một "batch" (React tự động làm điều này)
+      // Nhưng quan trọng hơn là thứ tự và tính toàn vẹn của dữ liệu
+
+      // 1. Add created blocks to blocks list with type_id
+      setBlocks((prevBlocks) => {
+        const newBlocks = [...prevBlocks];
+        response.creates!.forEach((createResult) => {
+          // Tránh thêm trùng lặp nếu block đã tồn tại
+          if (!newBlocks.some(b => b.id === createResult.block.id)) {
+            // Lấy thông tin block gốc từ ref để dự phòng trường hợp server trả về thiếu data (chưa restart backend)
+            const originalBlock = pendingCreatesRef.current.get(createResult.tempId);
+
+            newBlocks.push({
+              id: createResult.block.id,
+              pageId: createResult.block.pageId,
+              // FALLBACK: Ưu tiên type từ server, nhưng nếu rỗng thì dùng type từ block gốc
+              type: createResult.block.type || originalBlock?.type || 'text',
+              type_id: createResult.block.type || originalBlock?.type || 'text',
+              content: createResult.block.content,
+              position: createResult.block.position,
+              blockConfig: createResult.block.blockConfig || originalBlock?.blockConfig,
+              created_at: createResult.block.created_at,
+              updated_at: createResult.block.updated_at,
+            });
+          }
+        });
+        return newBlocks.sort((a, b) => a.position - b.position);
+      });
+
+      // 2. Remove temp blocks
       setPendingCreates((prev) => {
         const next = new Map(prev);
         response.creates!.forEach((createResult) => {
           next.delete(createResult.tempId);
         });
+        pendingCreatesRef.current = next; // Sync ref
         return next;
       });
 
-      // Add created blocks to blocks list
-      setBlocks((prevBlocks) => {
-        const newBlocks = [...prevBlocks];
-        response.creates!.forEach((createResult) => {
-          newBlocks.push({
-            id: createResult.block.id,
-            pageId: createResult.block.pageId,
-            type: createResult.block.type,
-            content: createResult.block.content,
-            position: createResult.block.position,
-            blockConfig: createResult.block.blockConfig,
-            created_at: createResult.block.created_at,
-            updated_at: createResult.block.updated_at,
-          });
-        });
-        return newBlocks.sort((a, b) => a.position - b.position);
-      });
-
-      // Update cursor position map with real IDs
+      // 3. Update cursor position map with real IDs
       setCursorPositions((prev) => {
         const next = new Map(prev);
         tempToRealMap.forEach((realId, tempId) => {
@@ -112,7 +150,7 @@ export function PageEditor({ pageId }: PageEditorProps) {
         return next;
       });
 
-      // Update focused block if it was temp
+      // 4. Update focused block if it was temp
       setFocusedBlockId((prev) => {
         if (prev && tempToRealMap.has(prev)) {
           return tempToRealMap.get(prev)!;
@@ -148,7 +186,7 @@ export function PageEditor({ pageId }: PageEditorProps) {
   useEffect(() => {
     if (!syncQueueRef.current) {
       syncQueueRef.current = new BlockSyncQueue({
-        syncInterval: 2000, // Debounce for 2 seconds
+        syncInterval: 500, // Debounce for 500ms - faster persistence
         maxBatchSize: 50, // Max 50 operations per batch
         maxRetries: 5, // Retry failed ops up to 5 times
         baseRetryDelay: 1000,
@@ -173,6 +211,45 @@ export function PageEditor({ pageId }: PageEditorProps) {
       }
     };
   }, [handleSyncSuccess]);
+
+  // Force sync on page unload to prevent data loss
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (syncQueueRef.current && !syncQueueRef.current.isEmpty()) {
+        // Try to force sync (may not complete in time, but attempt it)
+        syncQueueRef.current.forceSync();
+
+        // Show warning if there are pending changes
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden && syncQueueRef.current && !syncQueueRef.current.isEmpty()) {
+        // Force sync when page becomes hidden
+        syncQueueRef.current.forceSync();
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
+
+  // Cleanup block refs when blocks are deleted to prevent memory leaks
+  useEffect(() => {
+    const currentBlockIds = new Set(getAllBlocks().map(b => b.id));
+    for (const [blockId] of blockRefsMap.current.entries()) {
+      if (!currentBlockIds.has(blockId)) {
+        blockRefsMap.current.delete(blockId);
+      }
+    }
+  }, [blocks, pendingCreates, getAllBlocks]);
 
   // Create new block
   const createNewBlock = useCallback(
@@ -203,14 +280,15 @@ export function PageEditor({ pageId }: PageEditorProps) {
         updated_at: new Date().toISOString(),
       };
 
-      // Add to pending creates
+      // Add to pending creates AND update positions of existing blocks in one go
+      // Note: React 18 batches these, but consolidating logic ensures consistency
       setPendingCreates((prev) => {
         const next = new Map(prev);
         next.set(tempId, newBlock);
+        pendingCreatesRef.current = next; // Sync ref
         return next;
       });
 
-      // Update positions of blocks after
       setBlocks((prevBlocks) => {
         return prevBlocks.map((b) => {
           if (b.position >= newPosition) {
@@ -220,17 +298,22 @@ export function PageEditor({ pageId }: PageEditorProps) {
         });
       });
 
-      // Focus on new block and set cursor position
-      setTimeout(() => {
-        setFocusedBlockId(tempId);
-        setCursorPositions((prev) => {
-          const next = new Map(prev);
-          next.set(tempId, 0); // Cursor at start of new block
-          return next;
-        });
-        
-        // Ensure editor is focused and cursor is visible
-        requestAnimationFrame(() => {
+      // Focus on new block immediately to prevent placeholder flicker
+      const isListType = type === 'numbered_list' || type === 'bulleted_list';
+
+      // Batch setFocusedBlockId with other state updates if possible
+      // but creation and focus usually happen together
+      setFocusedBlockId(tempId);
+      setCursorPositions((prev) => {
+        const next = new Map(prev);
+        next.set(tempId, 0); // Cursor at start of new block
+        return next;
+      });
+
+      // Ensure editor is focused and cursor is visible
+      requestAnimationFrame(() => {
+        // Try multiple times for list blocks (structure is more complex)
+        const tryFocus = (attempts = 0) => {
           const blockElement = blockRefsMap.current.get(tempId);
           if (blockElement) {
             const editor = blockElement.querySelector<HTMLElement>('[contenteditable]');
@@ -248,11 +331,19 @@ export function PageEditor({ pageId }: PageEditorProps) {
               }
               selection?.removeAllRanges();
               selection?.addRange(range);
+            } else if (attempts < 3) {
+              // Retry if editor not found (DOM might not be ready yet)
+              setTimeout(() => tryFocus(attempts + 1), 10);
             }
+          } else if (attempts < 5) { // More attempts for list items
+            // Retry if block element not found
+            setTimeout(() => tryFocus(attempts + 1), 10);
           }
-        });
-      }, 0);
-      
+        };
+
+        tryFocus();
+      });
+
       // Enqueue create operation to sync queue
       if (syncQueueRef.current) {
         syncQueueRef.current.enqueue({
@@ -268,10 +359,6 @@ export function PageEditor({ pageId }: PageEditorProps) {
           },
           timestamp: Date.now(),
           priority: 'normal',
-        });
-        // Force immediate sync for testing
-        syncQueueRef.current.forceSync().catch((err) => {
-          console.error('Force sync failed:', err);
         });
       }
     },
@@ -305,7 +392,7 @@ export function PageEditor({ pageId }: PageEditorProps) {
         // Block was deleted, ignore update
         return;
       }
-      
+
       setBlocks((prevBlocks) =>
         prevBlocks.map((b) => (b.id === blockId ? { ...b, content } : b))
       );
@@ -315,41 +402,42 @@ export function PageEditor({ pageId }: PageEditorProps) {
   // Handle block update - optimistic update + API call (debounced from InlineBlockEditor)
   const handleUpdateBlock = useCallback(
     (blockId: string, data: { content?: string; type?: string; blockConfig?: Record<string, any> }) => {
-      // Check if block exists
-      const existingBlock = blocks.find((b) => b.id === blockId);
-      if (!existingBlock || blockId.startsWith('temp-')) {
-        // Block doesn't exist or is temp, update it in pending
-        if (blockId.startsWith('temp-')) {
-          setPendingCreates((prev) => {
-            const next = new Map(prev);
-            const block = next.get(blockId);
-            if (block) {
-              next.set(blockId, {
-                ...block,
-                ...(data.content !== undefined && { content: data.content }),
-                ...(data.type !== undefined && { type: data.type, type_id: data.type }),
-                ...(data.blockConfig !== undefined && { blockConfig: data.blockConfig, metadata: data.blockConfig }),
-              });
-            }
-            return next;
-          });
-        }
-        return;
-      }
+      // GIẢI PHÁP: Luôn sử dụng prevBlocks để đảm bảo lấy dữ liệu mới nhất trong hàng đợi state
+      setBlocks((prevBlocks) => {
+        const existingBlock = prevBlocks.find((b) => b.id === blockId);
 
-      // Optimistic update in local state
-      setBlocks((prevBlocks) => 
-        prevBlocks.map((b) =>
+        // Nếu không thấy trong blocks, có thể nó nằm trong pendingCreates (temp block)
+        if (!existingBlock) {
+          if (blockId.startsWith('temp-')) {
+            setPendingCreates((prevPending) => {
+              const next = new Map(prevPending);
+              const block = next.get(blockId);
+              if (block) {
+                next.set(blockId, {
+                  ...block,
+                  ...(data.content !== undefined && { content: data.content }),
+                  ...(data.type !== undefined && { type: data.type, type_id: data.type }),
+                  ...(data.blockConfig !== undefined && { blockConfig: data.blockConfig, metadata: data.blockConfig }),
+                });
+              }
+              return next;
+            });
+          }
+          return prevBlocks;
+        }
+
+        // Cập nhật block thật với dữ liệu mới nhất từ prevBlocks
+        return prevBlocks.map((b) =>
           b.id === blockId
             ? {
-                ...b,
-                ...(data.content !== undefined && { content: data.content }),
-                ...(data.type !== undefined && { type: data.type, type_id: data.type }),
-                ...(data.blockConfig !== undefined && { blockConfig: data.blockConfig, metadata: data.blockConfig }),
-              }
+              ...b,
+              ...(data.content !== undefined && { content: data.content }),
+              ...(data.type !== undefined && { type: data.type, type_id: data.type }),
+              ...(data.blockConfig !== undefined && { blockConfig: data.blockConfig, metadata: data.blockConfig }),
+            }
             : b
-        )
-      );
+        );
+      });
 
       // Enqueue update operation
       if (syncQueueRef.current) {
@@ -365,13 +453,9 @@ export function PageEditor({ pageId }: PageEditorProps) {
           timestamp: Date.now(),
           priority: 'normal',
         });
-        // Force immediate sync for testing
-        syncQueueRef.current.forceSync().catch((err) => {
-          console.error('Force sync failed:', err);
-        });
       }
     },
-    [blocks]
+    []
   );
 
   // Handle Enter key
@@ -381,8 +465,14 @@ export function PageEditor({ pageId }: PageEditorProps) {
       const block = allBlocks.find((b) => b.id === blockId);
       if (!block) return;
 
-      // Save current cursor position in current block before creating new block
-      const editor = blockRefsMap.current.get(blockId)?.querySelector<HTMLElement>('[contenteditable]');
+      // Lấy nội dung thực tế trực tiếp từ DOM trước khi tạo dòng mới
+      const blockElement = blockRefsMap.current.get(blockId);
+      const editor = blockElement?.querySelector<HTMLElement>('[contenteditable]');
+      const currentActualContent = editor?.textContent || '';
+
+      // CẬP NHẬT NGAY LẬP TỨC: Đảm bảo nội dung dòng hiện tại không bị mất
+      handleUpdateBlock(blockId, { content: currentActualContent });
+
       if (editor) {
         const selection = globalThis.getSelection();
         if (selection && selection.rangeCount > 0) {
@@ -391,7 +481,7 @@ export function PageEditor({ pageId }: PageEditorProps) {
           if (range.startContainer.nodeType === Node.TEXT_NODE) {
             cursorPos = range.startOffset;
           } else {
-            cursorPos = editor.textContent?.length || 0;
+            cursorPos = currentActualContent.length;
           }
           setCursorPositions((prev) => {
             const next = new Map(prev);
@@ -401,10 +491,27 @@ export function PageEditor({ pageId }: PageEditorProps) {
         }
       }
 
-      // Create new block right after current block
-      createNewBlock(blockId, 'text', '');
+      const currentType = block.type_id || block.type || 'text';
+
+      // Notion-like behavior for lists:
+      // - If empty list item + Enter → create text block (break out of list)
+      // - If list item with content + Enter → create new list item
+      let newBlockType = 'text'; // Default to text
+
+      if (currentType === 'numbered_list' || currentType === 'bulleted_list') {
+        // Check if current list item has content
+        if (currentActualContent && currentActualContent.trim().length > 0) {
+          // Has content → create new list item of same type
+          newBlockType = currentType;
+        } else {
+          // Empty list item → break out to text
+          newBlockType = 'text';
+        }
+      }
+
+      createNewBlock(blockId, newBlockType, '');
     },
-    [createNewBlock, getAllBlocks]
+    [createNewBlock, getAllBlocks, handleUpdateBlock] // Phải có handleUpdateBlock ở đây
   );
 
   // Handle Backspace on empty block
@@ -418,44 +525,52 @@ export function PageEditor({ pageId }: PageEditorProps) {
       const prevBlock = blockIndex > 0 ? allBlocks[blockIndex - 1] : null;
 
       if (block.id.startsWith('temp-')) {
-        // Remove pending block
+        // Remove pending block - single state update
         setPendingCreates((prev) => {
           const next = new Map(prev);
           next.delete(blockId);
           return next;
         });
+
+        // CRITICAL: Cancel the create operation in sync queue
+        if (syncQueueRef.current) {
+          syncQueueRef.current.dequeue(blockId);
+        }
       } else {
-        // Optimistic delete - remove from UI immediately
+        // Optimistic delete - single state update combining all changes
         setBlocks((prevBlocks) => prevBlocks.filter((b) => b.id !== blockId));
 
-        // Enqueue delete operation
+        // Enqueue delete operation - NO forceSync - let queue debounce naturally
         if (syncQueueRef.current) {
           syncQueueRef.current.enqueue({
             id: `delete-${blockId}-${Date.now()}`,
             type: 'delete',
             blockId: blockId,
             timestamp: Date.now(),
-            priority: 'normal',
+            priority: 'high', // Use high priority but let queue debounce
           });
-          // Force immediate sync for testing
-          syncQueueRef.current.forceSync().catch((err) => {
-            console.error('Force sync failed:', err);
-          });
+          // REMOVED: forceSync() - let natural debouncing handle it
         }
       }
 
-      // Focus on previous block
+      // Focus on previous block - combine state updates
       if (prevBlock) {
-        setTimeout(() => {
-          setFocusedBlockId(prevBlock.id);
-          // Move cursor to end of previous block
-          const prevContent = prevBlock.content || '';
-          setCursorPositions((prev) => {
-            const next = new Map(prev);
-            next.set(prevBlock.id, prevContent.length);
-            return next;
-          });
-        }, 0);
+        const prevContent = prevBlock.content || '';
+        setFocusedBlockId(prevBlock.id);
+        setCursorPositions((prev) => {
+          const next = new Map(prev);
+          next.set(prevBlock.id, prevContent.length);
+          return next;
+        });
+
+        // Use queueMicrotask instead of setTimeout(0)
+        queueMicrotask(() => {
+          const blockElement = blockRefsMap.current.get(prevBlock.id);
+          if (blockElement) {
+            const editor = blockElement.querySelector<HTMLElement>('[contenteditable]');
+            editor?.focus();
+          }
+        });
       }
     },
     [getAllBlocks]
@@ -495,6 +610,11 @@ export function PageEditor({ pageId }: PageEditorProps) {
           return next;
         });
 
+        // Cancel the create operation in sync queue
+        if (syncQueueRef.current) {
+          syncQueueRef.current.dequeue(blockId);
+        }
+
         // Update previous block content
         if (prevBlock.id.startsWith('temp-')) {
           // Both are temp blocks
@@ -524,10 +644,6 @@ export function PageEditor({ pageId }: PageEditorProps) {
               timestamp: Date.now(),
               priority: 'normal',
             });
-            // Force immediate sync for testing
-            syncQueueRef.current.forceSync().catch((err) => {
-              console.error('Force sync failed:', err);
-            });
           }
         }
       } else {
@@ -542,6 +658,24 @@ export function PageEditor({ pageId }: PageEditorProps) {
             return next;
           });
 
+          // Update the create operation in sync queue with new content
+          if (syncQueueRef.current) {
+            syncQueueRef.current.enqueue({
+              id: prevBlock.id,
+              type: 'create',
+              blockId: prevBlock.id,
+              data: {
+                pageId: prevBlock.pageId,
+                type: prevBlock.type,
+                content: mergedContent,
+                position: prevBlock.position,
+                blockConfig: prevBlock.blockConfig || {},
+              },
+              timestamp: Date.now(),
+              priority: 'normal',
+            });
+          }
+
           // Optimistic delete for current real block
           setBlocks((prevBlocks) => prevBlocks.filter((b) => b.id !== blockId));
 
@@ -553,10 +687,6 @@ export function PageEditor({ pageId }: PageEditorProps) {
               blockId: blockId,
               timestamp: Date.now(),
               priority: 'normal',
-            });
-            // Force immediate sync for testing
-            syncQueueRef.current.forceSync().catch((err) => {
-              console.error('Force sync failed:', err);
             });
           }
         } else {
@@ -590,23 +720,20 @@ export function PageEditor({ pageId }: PageEditorProps) {
               timestamp: Date.now(),
               priority: 'normal',
             });
-            // Force immediate sync for testing
-            syncQueueRef.current.forceSync().catch((err) => {
-              console.error('Force sync failed:', err);
-            });
           }
         }
       }
 
       // Focus on previous block at merge point (end of previous content)
-      setTimeout(() => {
-        setFocusedBlockId(prevBlock.id);
-        setCursorPositions((prev) => {
-          const next = new Map(prev);
-          next.set(prevBlock.id, cursorPos);
-          return next;
-        });
-        
+      setFocusedBlockId(prevBlock.id);
+      setCursorPositions((prev) => {
+        const next = new Map(prev);
+        next.set(prevBlock.id, cursorPos);
+        return next;
+      });
+
+      // Use queueMicrotask instead of setTimeout(0)
+      queueMicrotask(() => {
         // Ensure editor is focused and cursor is set
         requestAnimationFrame(() => {
           const blockElement = blockRefsMap.current.get(prevBlock.id);
@@ -619,31 +746,31 @@ export function PageEditor({ pageId }: PageEditorProps) {
               const selection = globalThis.getSelection();
               const textContent = editor.textContent || '';
               const targetPos = Math.min(cursorPos, textContent.length);
-              
+
               // Find text node and set cursor
               const walker = document.createTreeWalker(
                 editor,
                 NodeFilter.SHOW_TEXT,
                 null
               );
-              
+
               let currentPos = 0;
               let textNode: Text | null = null;
               let nodePos = 0;
-              
+
               while (walker.nextNode()) {
                 const node = walker.currentNode as Text;
                 const nodeLength = node.length;
-                
+
                 if (currentPos + nodeLength >= targetPos) {
                   textNode = node;
                   nodePos = targetPos - currentPos;
                   break;
                 }
-                
+
                 currentPos += nodeLength;
               }
-              
+
               if (textNode) {
                 range.setStart(textNode, nodePos);
                 range.setEnd(textNode, nodePos);
@@ -655,13 +782,13 @@ export function PageEditor({ pageId }: PageEditorProps) {
                 range.setStart(editor, 0);
                 range.setEnd(editor, 0);
               }
-              
+
               selection?.removeAllRanges();
               selection?.addRange(range);
             }
           }
         });
-      }, 0);
+      });
     },
     [getAllBlocks]
   );
@@ -692,20 +819,18 @@ export function PageEditor({ pageId }: PageEditorProps) {
             });
           }
         }
-        
-        // Move to previous block
-        setTimeout(() => {
-          setFocusedBlockId(prevBlock.id);
-          // Restore or set cursor position in previous block
-          const savedPos = cursorPositions.get(prevBlock.id);
-          const prevContent = prevBlock.content || '';
-          const targetPos = savedPos !== undefined ? savedPos : prevContent.length;
-          setCursorPositions((prev) => {
-            const next = new Map(prev);
-            next.set(prevBlock.id, targetPos);
-            return next;
-          });
-        }, 0);
+
+        // Move to previous block - use queueMicrotask
+        setFocusedBlockId(prevBlock.id);
+        // Restore or set cursor position in previous block
+        const savedPos = cursorPositions.get(prevBlock.id);
+        const prevContent = prevBlock.content || '';
+        const targetPos = savedPos !== undefined ? savedPos : prevContent.length;
+        setCursorPositions((prev) => {
+          const next = new Map(prev);
+          next.set(prevBlock.id, targetPos);
+          return next;
+        });
       }
     },
     [getAllBlocks, cursorPositions]
@@ -737,20 +862,18 @@ export function PageEditor({ pageId }: PageEditorProps) {
             });
           }
         }
-        
-        // Move to next block
-        setTimeout(() => {
-          setFocusedBlockId(nextBlock.id);
-          // Restore or set cursor position in next block
-          const savedPos = cursorPositions.get(nextBlock.id);
-          const nextContent = nextBlock.content || '';
-          const targetPos = savedPos !== undefined ? savedPos : 0;
-          setCursorPositions((prev) => {
-            const next = new Map(prev);
-            next.set(nextBlock.id, targetPos);
-            return next;
-          });
-        }, 0);
+
+        // Move to next block - use queueMicrotask
+        setFocusedBlockId(nextBlock.id);
+        // Restore or set cursor position in next block
+        const savedPos = cursorPositions.get(nextBlock.id);
+        const nextContent = nextBlock.content || '';
+        const targetPos = savedPos !== undefined ? savedPos : 0;
+        setCursorPositions((prev) => {
+          const next = new Map(prev);
+          next.set(nextBlock.id, targetPos);
+          return next;
+        });
       }
     },
     [getAllBlocks, cursorPositions]
@@ -903,10 +1026,6 @@ export function PageEditor({ pageId }: PageEditorProps) {
             priority: 'high', // Higher priority for drag operations
           });
         });
-        // Force immediate sync for testing
-        syncQueueRef.current.forceSync().catch((err) => {
-          console.error('Force sync failed:', err);
-        });
       }
 
       setDraggedBlockId(null);
@@ -972,13 +1091,11 @@ export function PageEditor({ pageId }: PageEditorProps) {
           onDragOver={(e) => handleDragOver(e, block.id)}
           onDragLeave={(e) => handleDragLeave(e)}
           onDrop={(e) => handleDrop(e, block.id)}
-          className={`block-editor-item transition-all duration-150 ${
-            draggedBlockId === block.id ? 'opacity-50 cursor-grabbing' : ''
-          } ${
-            dragOverBlockId === block.id ? 'border-t-2 border-blue-400 bg-blue-50' : ''
-          }`}
-          style={{ 
-            border: dragOverBlockId === block.id ? 'none' : 'none', 
+          className={`block-editor-item transition-all duration-150 ${draggedBlockId === block.id ? 'opacity-50 cursor-grabbing' : ''
+            } ${dragOverBlockId === block.id ? 'border-t-2 border-blue-400 bg-blue-50' : ''
+            }`}
+          style={{
+            border: dragOverBlockId === block.id ? 'none' : 'none',
             outline: 'none',
             boxShadow: 'none',
           }}
@@ -997,6 +1114,7 @@ export function PageEditor({ pageId }: PageEditorProps) {
             autoFocus={index === allBlocks.length - 1 && block.id.startsWith('temp-')}
             restoreCursorPosition={cursorPositions.get(block.id) ?? null}
             onUpdateBlock={handleUpdateBlock}
+            listNumber={calculateListNumber(block.id)}
           />
         </div>
       ))}
