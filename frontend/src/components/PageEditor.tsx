@@ -4,7 +4,7 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { Card } from './ui/card';
 import { InlineBlockEditor } from './InlineBlockEditor';
 import { blockApi, type Block } from '@/services/blockApi';
-import { BlockSyncQueue, type BatchSyncResponse } from '@/services/blockSyncQueue';
+import { BlockSyncManager, type BatchSyncResponse } from '@/services/blockSyncQueue';
 import { CONTENT_BLOCK_TYPES, type BlockTypeConfig } from '@/shared/types/blocks';
 
 interface PageEditorProps {
@@ -28,7 +28,7 @@ export function PageEditor({ pageId }: PageEditorProps) {
   const [cursorPositions, setCursorPositions] = useState<Map<string, number>>(new Map());
   const [draggedBlockId, setDraggedBlockId] = useState<string | null>(null);
   const [dragOverBlockId, setDragOverBlockId] = useState<string | null>(null);
-  const syncQueueRef = useRef<BlockSyncQueue | null>(null);
+  const syncQueueRef = useRef<BlockSyncManager | null>(null);
   const tempIdMapRef = useRef<Map<string, string>>(new Map()); // Maps temp IDs to real block IDs
 
   // Load blocks from server
@@ -97,6 +97,11 @@ export function PageEditor({ pageId }: PageEditorProps) {
       response.creates.forEach((createResult) => {
         tempToRealMap.set(createResult.tempId, createResult.block.id);
         tempIdMapRef.current.set(createResult.tempId, createResult.block.id);
+
+        // Remap pending operations in queue (e.g. updates that happened while create was in flight)
+        if (syncQueueRef.current) {
+          syncQueueRef.current.remapBlockId(createResult.tempId, createResult.block.id);
+        }
       });
 
       // GIẢI PHÁP: Cập nhật tất cả state liên quan đến ID transition trong cùng một "batch" (React tự động làm điều này)
@@ -185,7 +190,7 @@ export function PageEditor({ pageId }: PageEditorProps) {
   // Initialize sync queue with callbacks
   useEffect(() => {
     if (!syncQueueRef.current) {
-      syncQueueRef.current = new BlockSyncQueue({
+      syncQueueRef.current = new BlockSyncManager({
         syncInterval: 100, // Debounce for 100ms - almost immediate persistence
         maxBatchSize: 50, // Max 50 operations per batch
         maxRetries: 5, // Retry failed ops up to 5 times
@@ -205,9 +210,19 @@ export function PageEditor({ pageId }: PageEditorProps) {
 
     return () => {
       // Cleanup on unmount
-      if (syncQueueRef.current) {
-        syncQueueRef.current.destroy();
+      const syncManager = syncQueueRef.current;
+      if (syncManager) {
+        // Clear ref immediately so next mount creates a new instance
         syncQueueRef.current = null;
+
+        // Try to sync pending changes before destroying
+        // Note: This is fire-and-forget on unmount
+        syncManager.forceSync();
+
+        // Destroy instance after a small delay to allow sync to start
+        setTimeout(() => {
+          syncManager.destroy();
+        }, 0);
       }
     };
   }, [handleSyncSuccess]);
@@ -345,6 +360,7 @@ export function PageEditor({ pageId }: PageEditorProps) {
       });
 
       // Enqueue create operation to sync queue
+      console.log('[PageEditor] Enqueueing CREATE for:', tempId, { pageId, type: blockType.name });
       if (syncQueueRef.current) {
         syncQueueRef.current.enqueue({
           id: tempId,
@@ -440,6 +456,7 @@ export function PageEditor({ pageId }: PageEditorProps) {
       });
 
       // Enqueue update operation
+      console.log('[PageEditor] Enqueueing update for:', blockId, data);
       if (syncQueueRef.current) {
         syncQueueRef.current.enqueue({
           id: `update-${blockId}-${Date.now()}`,

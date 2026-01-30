@@ -1,3 +1,5 @@
+import { blockApi, type BatchSyncRequest, type BatchSyncResponse } from './blockApi';
+
 /**
  * BlockSyncQueue - Manages batched block operations for optimal performance
  * 
@@ -17,90 +19,44 @@ export interface QueuedOperation {
     content?: string;
     position?: number;
     blockConfig?: Record<string, any>;
+    tempId?: string;
   };
   timestamp: number;
   retryCount?: number;
   lastRetryAt?: number; // Timestamp of last retry attempt
   priority?: 'low' | 'normal' | 'high' | 'critical'; // Operation priority
+  status?: 'pending' | 'syncing'; // Sync status
 }
 
-export interface BatchSyncRequest {
-  creates?: Array<{
-    pageId: string;
-    type: string;
-    content?: string;
-    position: number;
-    blockConfig?: Record<string, any>;
-    tempId: string; // Frontend temp ID to map back
-  }>;
-  updates?: Array<{
-    id: string;
-    content?: string;
-    type?: string;
-    position?: number;
-    blockConfig?: Record<string, any>;
-  }>;
-  deletes?: string[]; // Block IDs to delete
-}
-
-export interface BatchSyncResponse {
-  creates: Array<{
-    tempId: string;
-    block: {
-      id: string;
-      pageId: string;
-      type: string;
-      content: string;
-      position: number;
-      blockConfig?: Record<string, any>;
-      created_at: string;
-      updated_at: string;
-    };
-  }>;
-  updates: Array<{
-    id: string;
-    block: {
-      id: string;
-      pageId: string;
-      type: string;
-      content: string;
-      position: number;
-      blockConfig?: Record<string, any>;
-      updated_at: string;
-    };
-  }>;
-  deletes: string[]; // Successfully deleted block IDs
-  errors?: Array<{
-    operationId: string;
-    type: BlockOperationType;
-    error: string;
-  }>;
-}
+export type { BatchSyncRequest, BatchSyncResponse };
 
 type SyncCallback = (response: BatchSyncResponse) => void;
 type ErrorCallback = (error: Error) => void;
 
-export class BlockSyncQueue {
+export class BlockSyncManager {
   private queue: Map<string, QueuedOperation> = new Map();
-  private syncTimer: ReturnType<typeof setTimeout> | null = null;
-  private isSyncing: boolean = false;
   private syncInterval: number;
   private maxBatchSize: number;
+  private maxRetries: number;
+  private baseRetryDelay: number;
+  private maxRetryDelay: number;
   private onSyncSuccess?: SyncCallback;
   private onSyncError?: ErrorCallback;
-  private maxRetries: number;
-  private baseRetryDelay: number; // Base delay for exponential backoff (ms)
-  private maxRetryDelay: number; // Maximum retry delay (ms)
+
+  private syncTimer: ReturnType<typeof setTimeout> | null = null;
+  private isSyncing: boolean = false;
 
   constructor(options: {
-    syncInterval?: number; // ms between syncs (default: 2000)
-    maxBatchSize?: number; // max operations per batch (default: 50)
-    maxRetries?: number; // max retry attempts (default: 5)
-    baseRetryDelay?: number; // base delay for exponential backoff (default: 1000)
-    maxRetryDelay?: number; // max retry delay (default: 30000)
+    syncInterval?: number;
+    maxBatchSize?: number;
+    maxRetries?: number;
+    baseRetryDelay?: number;
+    maxRetryDelay?: number;
     onSyncSuccess?: SyncCallback;
     onSyncError?: ErrorCallback;
   } = {}) {
+    console.log('[BlockSyncManager] v2.0 INSTANCE CREATED (Fresh Code)');
+    // ...
     this.syncInterval = options.syncInterval || 2000;
     this.maxBatchSize = options.maxBatchSize || 50;
     this.maxRetries = options.maxRetries || 5;
@@ -108,41 +64,96 @@ export class BlockSyncQueue {
     this.maxRetryDelay = options.maxRetryDelay || 30000;
     this.onSyncSuccess = options.onSyncSuccess;
     this.onSyncError = options.onSyncError;
+    console.log('[BlockSyncQueue] New Instance Created');
   }
 
   /**
    * Add or update an operation in the queue
    */
   enqueue(operation: QueuedOperation): void {
-    // For updates, replace existing operation with same blockId
-    if (operation.type === 'update' || operation.type === 'delete') {
-      // Remove any pending operations for this block
+    try {
+      console.log('[BlockSyncManager] Enqueue called for:', operation.type, operation.blockId);
+
+      let shouldEnqueue = true;
+
+      // Check against existing operations
       for (const [key, op] of this.queue.entries()) {
         if (op.blockId === operation.blockId) {
-          // If we're deleting, remove all operations for this block
+
           if (operation.type === 'delete') {
-            this.queue.delete(key);
+            // CASE: We are deleting a block that has pending operations
+
+            if (op.status === 'syncing') {
+              // If operating is syncing, we cannot remove it.
+              // We MUST enqueue the delete execution to happen after sync finishes.
+              // Note: If op is 'create' and syncing, our delete op (temp-id) will be skipped by syncBatch,
+              // but remapBlockId will update it to (real-id) later, which will then sync. Correct.
+              console.log('[BlockSyncQueue] Deleting syncing block - enqueuing delete for later:', key);
+              continue; // Keep scanning (rare, but maybe duplicates)
+            }
+
+            // If operation is pending, we can remove it.
+            if (op.type === 'create') {
+              // CASE: Deleting a pending CREATE.
+              // Cancellation: We don't need to create, and we don't need to delete.
+              // Just remove the create op and Do Not enqueue the delete op.
+              console.log('[BlockSyncQueue] Cancelling pending create due to delete:', key);
+              this.queue.delete(key);
+              shouldEnqueue = false; // Cancel the delete op too
+              break; // Optimization: one create per block usually
+            } else {
+              // CASE: Deleting a pending UPDATE.
+              // Remove the update, but we STILL need to enqueue the DELETE.
+              console.log('[BlockSyncQueue] Replacing pending update with delete:', key);
+              this.queue.delete(key);
+            }
+
           } else if (op.type === 'create') {
+            // CASE: Creating a block that already has ops? (Shouldn't happen for same ID)
+            if (op.status === 'syncing') {
+              console.log('[BlockSyncQueue] Skipping merge into syncing create:', key);
+              continue;
+            }
             // Can't update a block that's being created - keep create, update data
+            // (Handling logical merge of data)
             const updatedOp: QueuedOperation = {
               ...op,
               data: { ...op.data, ...operation.data },
+              timestamp: Date.now(), // Reset debounce
             };
             this.queue.set(key, updatedOp);
-            return;
+            return; // Done
+
+          } else if (op.type === 'update' && operation.type === 'update') {
+            // CASE: coalescing updates
+            if (op.status === 'syncing') {
+              continue;
+            }
+            // Coalesce updates
+            const updatedOp: QueuedOperation = {
+              ...op,
+              data: { ...op.data, ...operation.data },
+              timestamp: Date.now(), // Reset debounce
+            };
+            this.queue.set(key, updatedOp);
+            return; // Done
           }
         }
       }
+
+      if (shouldEnqueue) {
+        // Add new operation
+        this.queue.set(operation.id, {
+          ...operation,
+          timestamp: Date.now(),
+        });
+        // Schedule sync if not already scheduled
+        this.scheduleSync();
+      }
+
+    } catch (error) {
+      console.error('[BlockSyncManager] Enqueue failed:', error);
     }
-
-    // Add new operation
-    this.queue.set(operation.id, {
-      ...operation,
-      timestamp: Date.now(),
-    });
-
-    // Schedule sync if not already scheduled
-    this.scheduleSync();
   }
 
   /**
@@ -150,6 +161,37 @@ export class BlockSyncQueue {
    */
   dequeue(operationId: string): void {
     this.queue.delete(operationId);
+  }
+
+  /**
+   * Remap block ID for pending operations (e.g. when temp ID becomes real ID)
+   */
+  remapBlockId(oldId: string, newId: string): void {
+    console.log('[BlockSyncQueue] Remapping ID:', oldId, '->', newId);
+    for (const [opId, op] of this.queue.entries()) {
+      if (op.blockId === oldId) {
+        // Create updated operation with new block ID
+        const updatedOp: QueuedOperation = {
+          ...op,
+          blockId: newId,
+        };
+
+        // Update data payload if it contains the ID
+        if (updatedOp.data) {
+          if (updatedOp.type === 'create' && updatedOp.data.tempId === oldId) {
+            updatedOp.data.tempId = newId;
+          } else if (updatedOp.type === 'update' && updatedOp.id === oldId) {
+            // This shouldn't happen for update ops (id is usually "update-..."), 
+            // but just in case the op ID matches
+          }
+          // Note: for updates, the ID in the payload is usually implicit or separate
+        }
+
+        this.queue.set(opId, updatedOp);
+      }
+    }
+    // Schedule sync to process remapped operations
+    this.scheduleSync();
   }
 
   /**
@@ -188,10 +230,11 @@ export class BlockSyncQueue {
    * Schedule next sync
    */
   private scheduleSync(): void {
-    if (this.syncTimer || this.isSyncing) {
+    if (this.syncTimer) {
       return;
     }
 
+    console.log('[BlockSyncQueue] Scheduling sync in', this.syncInterval, 'ms');
     this.syncTimer = setTimeout(() => {
       this.syncTimer = null;
       this.sync();
@@ -202,7 +245,7 @@ export class BlockSyncQueue {
    * Force immediate sync (for critical operations)
    */
   async forceSync(): Promise<BatchSyncResponse | null> {
-    if (this.isSyncing || this.queue.size === 0) {
+    if (this.queue.size === 0) {
       return null;
     }
 
@@ -218,20 +261,33 @@ export class BlockSyncQueue {
    * Sync operations to server
    */
   private async sync(): Promise<BatchSyncResponse | null> {
-    if (this.isSyncing || this.queue.size === 0) {
+    // Note: We allow parallel syncs now (status tracking handles concurrency)
+    // But we still block if queue is empty to avoid useless calls
+    if (this.queue.size === 0) {
       return null;
     }
 
     this.isSyncing = true;
+    console.log('[BlockSyncQueue] Sync started. Queue size:', this.queue.size);
+
+    // Capture operations for this sync execution scope
+    let operations: QueuedOperation[] = [];
 
     try {
       // Get operations to sync (limit by maxBatchSize)
-      // Sort by priority (critical > high > normal > low) then by timestamp
+      // Filter for PENDING operations only
       const now = Date.now();
-      const operations = Array.from(this.queue.values())
+      operations = Array.from(this.queue.values())
         .filter((op) => {
-          // Only include operations that are ready (timestamp <= now)
-          return op.timestamp <= now;
+          // Include operations that are ready (timestamp <= now) AND pending
+          const shouldSync = op.timestamp <= now && (!op.status || op.status === 'pending');
+          if (!shouldSync) return false;
+
+          if ((op.type === 'update' || op.type === 'delete') && op.blockId.startsWith('temp-')) {
+            console.log('[BlockSyncQueue] Skipping temp-ID op:', op.id);
+            return false;
+          }
+          return true;
         })
         .sort((a, b) => {
           // Priority order: critical > high > normal > low
@@ -243,7 +299,7 @@ export class BlockSyncQueue {
           };
           const aPriority = priorityOrder[a.priority || 'normal'];
           const bPriority = priorityOrder[b.priority || 'normal'];
-          
+
           if (aPriority !== bPriority) {
             return aPriority - bPriority;
           }
@@ -253,8 +309,25 @@ export class BlockSyncQueue {
         .slice(0, this.maxBatchSize);
 
       if (operations.length === 0) {
-        this.isSyncing = false;
+        // Check if there are ANY syncing ops globally to update isSyncing flag correctly
+        const hasSyncingOps = Array.from(this.queue.values()).some(op => op.status === 'syncing');
+        this.isSyncing = hasSyncingOps;
+        console.log('[BlockSyncQueue] No operations to sync. isSyncing:', this.isSyncing);
+
+        // Schedule next sync if pending operations exist
+        const pendingOps = Array.from(this.queue.values()).filter(op => !op.status || op.status === 'pending');
+        if (pendingOps.length > 0) {
+          console.log('[BlockSyncQueue] Pending ops exist (retry/wait). Scheduling next sync.');
+          this.scheduleSync();
+        }
+
         return null;
+      }
+
+      // Mark operations as syncing to prevent other syncs from picking them up
+      for (const op of operations) {
+        op.status = 'syncing';
+        this.queue.set(op.id, op);
       }
 
       // Build batch request
@@ -264,11 +337,7 @@ export class BlockSyncQueue {
         deletes: [],
       };
 
-      const operationIds: string[] = [];
-
       for (const op of operations) {
-        operationIds.push(op.id);
-
         switch (op.type) {
           case 'create':
             if (op.data?.pageId && op.data?.type) {
@@ -280,10 +349,14 @@ export class BlockSyncQueue {
                 blockConfig: op.data.blockConfig,
                 tempId: op.blockId, // Use blockId as tempId
               });
+            } else {
+              console.error('[BlockSyncQueue] Dropping INVALID create op (missing pageId/type):', op);
+              this.queue.delete(op.id); // Remove invalid op to prevent retry loop
             }
             break;
 
           case 'update':
+            // Validation for update?
             batchRequest.updates!.push({
               id: op.blockId,
               content: op.data?.content,
@@ -299,28 +372,35 @@ export class BlockSyncQueue {
         }
       }
 
-      // Only sync if there are operations
+      // Only sync if there are operations (double check though filtering implies there are)
       if (
         (batchRequest.creates?.length ?? 0) === 0 &&
         (batchRequest.updates?.length ?? 0) === 0 &&
         (batchRequest.deletes?.length ?? 0) === 0
       ) {
-        this.isSyncing = false;
+        // Reset status if no valid ops found
+        for (const op of operations) {
+          op.status = 'pending';
+          this.queue.set(op.id, op);
+        }
+
+        const hasSyncingOps = Array.from(this.queue.values()).some(op => op.status === 'syncing');
+        this.isSyncing = hasSyncingOps;
         return null;
       }
 
-      // Call batch sync API (will be implemented in blockApi.ts)
+      // Call batch sync API
       const response = await this.syncBatch(batchRequest);
 
       // Remove successfully synced operations
       const successfulOps = new Set<string>();
-      
+
       // Track successful creates
       response.creates.forEach((create) => {
-        // Find operation by tempId
-        for (const [key, op] of this.queue.entries()) {
+        // Find operation by tempId (which is blockId)
+        for (const op of operations) {
           if (op.type === 'create' && op.blockId === create.tempId) {
-            successfulOps.add(key);
+            successfulOps.add(op.id);
             break;
           }
         }
@@ -328,9 +408,9 @@ export class BlockSyncQueue {
 
       // Track successful updates
       response.updates.forEach((update) => {
-        for (const [key, op] of this.queue.entries()) {
+        for (const op of operations) {
           if (op.type === 'update' && op.blockId === update.id) {
-            successfulOps.add(key);
+            successfulOps.add(op.id);
             break;
           }
         }
@@ -338,9 +418,9 @@ export class BlockSyncQueue {
 
       // Track successful deletes
       response.deletes.forEach((blockId) => {
-        for (const [key, op] of this.queue.entries()) {
+        for (const op of operations) {
           if (op.type === 'delete' && op.blockId === blockId) {
-            successfulOps.add(key);
+            successfulOps.add(op.id);
             break;
           }
         }
@@ -352,7 +432,12 @@ export class BlockSyncQueue {
       // Handle errors - retry with exponential backoff
       if (response.errors && response.errors.length > 0) {
         for (const error of response.errors) {
-          const op = this.queue.get(error.operationId);
+          let op = this.queue.get(error.operationId);
+          // If not found by ID directly, search in current batch operations
+          if (!op) {
+            op = operations.find(o => o.blockId === error.operationId || o.id === error.operationId);
+          }
+
           if (op) {
             const retryCount = (op.retryCount || 0) + 1;
             if (retryCount < this.maxRetries) {
@@ -361,17 +446,18 @@ export class BlockSyncQueue {
                 this.baseRetryDelay * Math.pow(2, retryCount - 1),
                 this.maxRetryDelay
               );
-              
-              // Schedule retry with exponential backoff
-              this.queue.set(error.operationId, {
+
+              // Schedule retry with exponential backoff AND RESET STATUS
+              this.queue.set(op.id, {
                 ...op,
                 retryCount,
                 lastRetryAt: Date.now(),
-                timestamp: Date.now() + delay, // Schedule retry in the future
+                timestamp: Date.now() + delay,
+                status: 'pending', // Reset to pending
               });
             } else {
               // Remove after max retries
-              this.queue.delete(error.operationId);
+              this.queue.delete(op.id);
               console.error('Operation failed after max retries:', error);
             }
           }
@@ -383,47 +469,56 @@ export class BlockSyncQueue {
         this.onSyncSuccess(response);
       }
 
-      // Schedule next sync if queue is not empty
-      if (this.queue.size > 0) {
+      // Update sync state before scheduling next
+      const hasSyncingOps = Array.from(this.queue.values()).some(op => op.status === 'syncing');
+      this.isSyncing = hasSyncingOps;
+
+      // Schedule next sync if pending operations exist
+      const pendingOps = Array.from(this.queue.values()).filter(op => !op.status || op.status === 'pending');
+      if (pendingOps.length > 0) {
         this.scheduleSync();
       }
 
-      this.isSyncing = false;
       return response;
     } catch (error) {
-      this.isSyncing = false;
+      // Handle generic transport errors (e.g. network offline)
       const err = error instanceof Error ? error : new Error('Unknown sync error');
-      
+
       if (this.onSyncError) {
         this.onSyncError(err);
       } else {
         console.error('Block sync failed:', err);
       }
 
-      // Retry failed operations with exponential backoff
+      // Retry ALL operations in this batch with exponential backoff
       const now = Date.now();
-      for (const op of Array.from(this.queue.values())) {
-        const retryCount = (op.retryCount || 0) + 1;
-        if (retryCount < this.maxRetries) {
-          // Calculate exponential backoff delay
-          const delay = Math.min(
-            this.baseRetryDelay * Math.pow(2, retryCount - 1),
-            this.maxRetryDelay
-          );
-          
-          this.queue.set(op.id, {
-            ...op,
-            retryCount,
-            lastRetryAt: now,
-            timestamp: now + delay, // Schedule retry in the future
-          });
-        } else {
-          // Remove after max retries
-          this.queue.delete(op.id);
+      for (const op of operations) {
+        if (this.queue.has(op.id)) {
+          const retryCount = (op.retryCount || 0) + 1;
+          if (retryCount < this.maxRetries) {
+            const delay = Math.min(
+              this.baseRetryDelay * Math.pow(2, retryCount - 1),
+              this.maxRetryDelay
+            );
+
+            this.queue.set(op.id, {
+              ...op,
+              retryCount,
+              lastRetryAt: now,
+              timestamp: now + delay,
+              status: 'pending', // IMPORTANT: Reset to pending
+            });
+          } else {
+            this.queue.delete(op.id);
+          }
         }
       }
 
-      // Schedule retry (will check timestamps)
+      // Update sync state before scheduling retry
+      const hasSyncingOps = Array.from(this.queue.values()).some(op => op.status === 'syncing');
+      this.isSyncing = hasSyncingOps;
+
+      // Schedule retry
       this.scheduleSync();
       return null;
     }
@@ -433,8 +528,7 @@ export class BlockSyncQueue {
    * Call batch sync API
    */
   private async syncBatch(request: BatchSyncRequest): Promise<BatchSyncResponse> {
-    // Import blockApi dynamically to avoid circular dependencies
-    const { blockApi } = await import('./blockApi');
+    console.log('[BlockSyncQueue] Calling API batchSync with:', request);
     return blockApi.batchSync(request);
   }
 
@@ -462,4 +556,3 @@ export class BlockSyncQueue {
     this.onSyncError = undefined;
   }
 }
-
