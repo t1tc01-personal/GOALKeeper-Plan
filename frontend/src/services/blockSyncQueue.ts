@@ -18,6 +18,7 @@ export interface QueuedOperation {
     type?: string;
     content?: string;
     position?: number;
+    parent_block_id?: string | null;
     blockConfig?: Record<string, any>;
     tempId?: string;
   };
@@ -346,6 +347,7 @@ export class BlockSyncManager {
                 type: op.data.type,
                 content: op.data.content,
                 position: op.data.position ?? 0,
+                parent_block_id: op.data.parent_block_id,
                 blockConfig: op.data.blockConfig,
                 tempId: op.blockId, // Use blockId as tempId
               });
@@ -362,6 +364,7 @@ export class BlockSyncManager {
               content: op.data?.content,
               type: op.data?.type,
               position: op.data?.position,
+              parent_block_id: op.data?.parent_block_id,
               blockConfig: op.data?.blockConfig,
             });
             break;

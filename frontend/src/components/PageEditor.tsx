@@ -3,6 +3,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { Card } from './ui/card';
 import { InlineBlockEditor } from './InlineBlockEditor';
+import { BlockWithChildren } from './BlockWithChildren';
 import { blockApi, type Block } from '@/services/blockApi';
 import { BlockSyncManager, type BatchSyncResponse } from '@/services/blockSyncQueue';
 import { CONTENT_BLOCK_TYPES, type BlockTypeConfig } from '@/shared/types/blocks';
@@ -124,6 +125,8 @@ export function PageEditor({ pageId }: PageEditorProps) {
               type_id: createResult.block.type || originalBlock?.type || 'text',
               content: createResult.block.content,
               position: createResult.block.position,
+              // CRITICAL FIX: Ensure parent_block_id is preserved
+              parent_block_id: createResult.block.parent_block_id || originalBlock?.parent_block_id,
               blockConfig: createResult.block.blockConfig || originalBlock?.blockConfig,
               created_at: createResult.block.created_at,
               updated_at: createResult.block.updated_at,
@@ -268,16 +271,52 @@ export function PageEditor({ pageId }: PageEditorProps) {
 
   // Create new block
   const createNewBlock = useCallback(
-    (afterBlockId: string, type: string = 'text', content: string = '') => {
+    (afterBlockId: string, type: string = 'text', content: string = '', parentBlockId?: string | null) => {
       if (!pageId) return;
 
       const allBlocks = getAllBlocks();
       const afterBlock = allBlocks.find((b) => b.id === afterBlockId);
-      const afterIndex = afterBlock
-        ? allBlocks.findIndex((b) => b.id === afterBlockId)
-        : -1;
 
-      const newPosition = afterIndex >= 0 ? afterBlock!.position + 1 : allBlocks.length;
+      // Determine parent ID: use explicit arg if provided, otherwise inherit from sibling
+      // If parentBlockId is undefined (not passed), we use afterBlock's parent (sibling logic)
+      // If it is null (explicitly root), we use null.
+      const targetParentId = parentBlockId !== undefined ? parentBlockId : (afterBlock?.parent_block_id || undefined);
+
+      console.log('[createNewBlock] Position calculation:', {
+        afterBlockId,
+        afterBlockParent: afterBlock?.parent_block_id,
+        targetParentId,
+        isToggleChild: targetParentId === afterBlockId
+      });
+
+      // Calculate new position within the target parent scope
+      let newPosition = 0;
+
+      // Filter siblings in the target scope
+      const siblings = allBlocks.filter(b => b.parent_block_id === targetParentId);
+      console.log('[createNewBlock] Siblings in target scope:', siblings.length, siblings.map(b => ({ id: b.id, pos: b.position })));
+
+      if (afterBlock && afterBlock.parent_block_id === targetParentId) {
+        // Inserting after a sibling
+        newPosition = (afterBlock.position || 0) + 100; // Use gap of 100 to avoid excessive shifting
+        // In a real implementation we might want to shift subsequent blocks if gap is too small,
+        // but for now let's try to assume we can just +1 or +100.
+        // BUT wait, existing logic used +1 and shifted everyone.
+        // Let's stick to +1 shift logic but SCOPED to parent.
+        newPosition = (afterBlock.position || 0) + 1;
+        console.log('[createNewBlock] Inserting after sibling, position:', newPosition);
+      } else {
+        // Inserting as first child (or appending if no afterBlock matches)
+        if (siblings.length > 0) {
+          // Append to end
+          const maxPos = Math.max(...siblings.map(b => b.position || 0));
+          newPosition = maxPos + 1;
+          console.log('[createNewBlock] Appending to end, position:', newPosition);
+        } else {
+          newPosition = 0;
+          console.log('[createNewBlock] First child, position:', newPosition);
+        }
+      }
 
       const tempId = generateTempId();
       const blockType = CONTENT_BLOCK_TYPES.find((t) => t.name === type) || CONTENT_BLOCK_TYPES[0];
@@ -289,6 +328,7 @@ export function PageEditor({ pageId }: PageEditorProps) {
         type_id: blockType.name,
         content: content,
         position: newPosition,
+        parent_block_id: targetParentId || undefined, // undefined in interface vs null in DB? Check Block interface.
         metadata: blockType.defaultMetadata || {},
         blockConfig: blockType.defaultMetadata || {},
         created_at: new Date().toISOString(),
@@ -306,8 +346,9 @@ export function PageEditor({ pageId }: PageEditorProps) {
 
       setBlocks((prevBlocks) => {
         return prevBlocks.map((b) => {
-          if (b.position >= newPosition) {
-            return { ...b, position: b.position + 1 };
+          // Only shift blocks in the SAME parent scope
+          if (b.parent_block_id === targetParentId && (b.position || 0) >= newPosition) {
+            return { ...b, position: (b.position || 0) + 1 };
           }
           return b;
         });
@@ -371,6 +412,7 @@ export function PageEditor({ pageId }: PageEditorProps) {
             type: blockType.name,
             content: content,
             position: newPosition,
+            parent_block_id: targetParentId || undefined,
             blockConfig: blockType.defaultMetadata || {},
           },
           timestamp: Date.now(),
@@ -417,7 +459,15 @@ export function PageEditor({ pageId }: PageEditorProps) {
 
   // Handle block update - optimistic update + API call (debounced from InlineBlockEditor)
   const handleUpdateBlock = useCallback(
-    (blockId: string, data: { content?: string; type?: string; blockConfig?: Record<string, any> }) => {
+    (blockId: string, data: { content?: string; type?: string; blockConfig?: Record<string, any>; parent_block_id?: string | null }) => {
+      console.log('[DEBUG handleUpdateBlock] blockId:', blockId, 'data:', data);
+
+      // CRITICAL: Check if content is being set to empty string
+      if (data.content !== undefined && data.content === '') {
+        console.warn('[DEBUG handleUpdateBlock] ⚠️ Content is empty string! BlockId:', blockId);
+        // console.trace('[DEBUG handleUpdateBlock] Stack trace for empty content');
+      }
+
       // GIẢI PHÁP: Luôn sử dụng prevBlocks để đảm bảo lấy dữ liệu mới nhất trong hàng đợi state
       setBlocks((prevBlocks) => {
         const existingBlock = prevBlocks.find((b) => b.id === blockId);
@@ -440,6 +490,13 @@ export function PageEditor({ pageId }: PageEditorProps) {
             });
           }
           return prevBlocks;
+        }
+
+        // Log blockConfig updates specifically
+        if (data.blockConfig !== undefined) {
+          console.log('[handleUpdateBlock] Updating blockConfig for', blockId);
+          console.log('[handleUpdateBlock] Old blockConfig:', existingBlock.blockConfig);
+          console.log('[handleUpdateBlock] New blockConfig:', data.blockConfig);
         }
 
         // Cập nhật block thật với dữ liệu mới nhất từ prevBlocks
@@ -465,6 +522,7 @@ export function PageEditor({ pageId }: PageEditorProps) {
           data: {
             content: data.content,
             type: data.type,
+            parent_block_id: data.parent_block_id,
             blockConfig: data.blockConfig,
           },
           timestamp: Date.now(),
@@ -475,17 +533,101 @@ export function PageEditor({ pageId }: PageEditorProps) {
     []
   );
 
+  // Handle Indent (Tab)
+  const handleIndent = useCallback((blockId: string) => {
+    const allBlocks = getAllBlocks();
+    const block = allBlocks.find((b) => b.id === blockId);
+    if (!block) return;
+
+    // Find siblings (same parent) sorted by position
+    const siblings = allBlocks
+      .filter((b) => b.parent_block_id === block.parent_block_id)
+      .sort((a, b) => (a.position || 0) - (b.position || 0));
+
+    const currentIndex = siblings.findIndex((b) => b.id === blockId);
+
+    // Cannot indent if first child
+    if (currentIndex <= 0) return;
+
+    const prevSibling = siblings[currentIndex - 1];
+
+    console.log(`[handleIndent] Indenting block ${blockId} into new parent ${prevSibling.id}`);
+
+    // Update parent_block_id
+    handleUpdateBlock(blockId, {
+      parent_block_id: prevSibling.id
+    });
+
+    // Expand the new parent if it's a collapsed toggle
+    if ((prevSibling.type === 'toggle' || prevSibling.type_id === 'toggle') && prevSibling.blockConfig?.collapsed) {
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[Indent Auto-Expand]', {
+          toggleId: prevSibling.id,
+          wasCollapsed: true,
+          expandingForChild: blockId,
+        });
+      }
+      handleUpdateBlock(prevSibling.id, {
+        blockConfig: { ...prevSibling.blockConfig, collapsed: false }
+      });
+    }
+
+  }, [getAllBlocks, handleUpdateBlock]);
+
+  // Handle Outdent (Shift+Tab)
+  const handleOutdent = useCallback((blockId: string) => {
+    const allBlocks = getAllBlocks();
+    const block = allBlocks.find((b) => b.id === blockId);
+    if (!block) return;
+
+    // Cannot outdent if at root level (no parent)
+    if (!block.parent_block_id) return;
+
+    // Find current parent to get its parent (grandparent)
+    const currentParent = allBlocks.find(b => b.id === block.parent_block_id);
+    const newParentId = currentParent ? currentParent.parent_block_id : null;
+
+    console.log(`[handleOutdent] Outdenting block ${blockId} to new parent ${newParentId}`);
+
+    handleUpdateBlock(blockId, {
+      parent_block_id: newParentId
+    });
+
+  }, [getAllBlocks, handleUpdateBlock]);
+
   // Handle Enter key
   const handleEnter = useCallback(
-    (blockId: string) => {
+    (blockId: string, contentFromEditor?: string) => {
       const allBlocks = getAllBlocks();
       const block = allBlocks.find((b) => b.id === blockId);
       if (!block) return;
 
-      // Lấy nội dung thực tế trực tiếp từ DOM trước khi tạo dòng mới
+      // PRIORITY 1: Content passed directly from the editor component (Most reliable)
+      let currentActualContent = contentFromEditor;
+
       const blockElement = blockRefsMap.current.get(blockId);
       const editor = blockElement?.querySelector<HTMLElement>('[contenteditable]');
-      const currentActualContent = editor?.textContent || '';
+
+      // PRIORITY 2: If not passed, try to read from DOM (Legacy/Fallback)
+      if (currentActualContent === undefined) {
+        currentActualContent = editor?.textContent || '';
+      }
+
+      // SAFETY CHECK: If content is empty but block state has content, 
+      // check if we should fallback to state to prevent data loss.
+      // We accept empty content ONLY if it was explicitly passed as empty string (user deleted text),
+      // BUT if we are in a "lost text" race condition, relying on block.content is safer.
+      if (currentActualContent === '' && block.content && block.content.length > 0) {
+        // If contentFromEditor was explicitly "", user might have just deleted it?
+        // But usually hitting Enter on empty content -> empty content.
+        // Hitting Enter on "Hello" -> should be "Hello".
+        // If we received "" but state is "Hello", it's suspicious.
+        // Assume fallback.
+        currentActualContent = block.content;
+      }
+
+      // Ensure string
+      if (currentActualContent === undefined) currentActualContent = '';
 
       // CẬP NHẬT NGAY LẬP TỨC: Đảm bảo nội dung dòng hiện tại không bị mất
       handleUpdateBlock(blockId, { content: currentActualContent });
@@ -510,12 +652,40 @@ export function PageEditor({ pageId }: PageEditorProps) {
 
       const currentType = block.type_id || block.type || 'text';
 
+      // CRITICAL FIX: Notion-like behavior for nested blocks
+      // Default: new block is sibling (same parent as current block)
+      let newParentId = block.parent_block_id;
+
+      // SPECIAL CASE: Enter inside Expanded Toggle -> Create Child (not sibling)
+      const isToggle = currentType === 'toggle';
+      const isExpanded = isToggle && !(block.blockConfig?.collapsed || block.metadata?.collapsed);
+
+      if (isExpanded) {
+        // User pressed Enter inside an expanded toggle
+        // New block should be CHILD of toggle
+        newParentId = block.id;
+        console.log('[Enter in Toggle]', {
+          toggleId: block.id,
+          creatingChildWith: { parent: newParentId },
+          timestamp: new Date().toISOString(),
+        });
+      }
+      // ELSE: Current block is NOT a toggle (or is collapsed)
+      // Keep newParentId = block.parent_block_id
+      // This creates a SIBLING at the same nesting level
+
+      // 2. Enter on Empty Block inside Valid Parent -> Outdent (Break out)
+      if (block.parent_block_id && currentActualContent === '' && currentType === 'text') {
+        handleOutdent(blockId);
+        return;
+      }
+
       // Notion-like behavior for lists:
       // - If empty list item + Enter → create text block (break out of list)
       // - If list item with content + Enter → create new list item
       let newBlockType = 'text'; // Default to text
 
-      if (currentType === 'numbered_list' || currentType === 'bulleted_list') {
+      if (currentType === 'numbered_list' || currentType === 'bulleted_list' || currentType === 'todo_list') {
         // Check if current list item has content
         if (currentActualContent && currentActualContent.trim().length > 0) {
           // Has content → create new list item of same type
@@ -526,22 +696,100 @@ export function PageEditor({ pageId }: PageEditorProps) {
         }
       }
 
-      createNewBlock(blockId, newBlockType, '');
+      console.log('[DEBUG handleEnter] Creating new block with type:', newBlockType, 'parent:', newParentId);
+
+      // CRITICAL FIX: Use queueMicrotask to ensure handleUpdateBlock state update completes
+      // before creating new block. This prevents content loss during the transition.
+      queueMicrotask(() => {
+        createNewBlock(blockId, newBlockType, '', newParentId);
+      });
     },
-    [createNewBlock, getAllBlocks, handleUpdateBlock] // Phải có handleUpdateBlock ở đây
+    [createNewBlock, getAllBlocks, handleUpdateBlock, handleOutdent] // Phải có handleUpdateBlock ở đây
   );
 
   // Handle Backspace on empty block
   const handleBackspace = useCallback(
     (blockId: string) => {
+      console.log('[handleBackspace] Called with blockId:', blockId);
+
       const allBlocks = getAllBlocks();
       const block = allBlocks.find((b) => b.id === blockId);
-      if (!block) return;
+      if (!block) {
+        console.log('[handleBackspace] Block not found, returning');
+        return;
+      }
 
       const blockIndex = allBlocks.findIndex((b) => b.id === blockId);
       const prevBlock = blockIndex > 0 ? allBlocks[blockIndex - 1] : null;
 
+      console.log('[handleBackspace] Block info:', {
+        blockId,
+        blockIndex,
+        totalBlocks: allBlocks.length,
+        hasPrevBlock: !!prevBlock,
+        prevBlockId: prevBlock?.id,
+        isFirstBlock: blockIndex === 0,
+        hasParent: !!block.parent_block_id
+      });
+
+      // FIXED: Prevent deleting the first and only block on the page
+      // Instead, convert it to an empty text block (Notion-like behavior)
+      // Only top-level blocks count (blocks without parent)
+      const topLevelBlocks = allBlocks.filter(b => !b.parent_block_id);
+      console.log('[handleBackspace] Top-level blocks count:', topLevelBlocks.length);
+
+      if (topLevelBlocks.length === 1 && !prevBlock && !block.parent_block_id) {
+        // This is the only top-level block - don't delete, just clear it
+        console.log('[handleBackspace] Preventing deletion of the only block on the page');
+
+        // Convert to empty text block instead of deleting
+        if (block.id.startsWith('temp-')) {
+          // Update temp block
+          setPendingCreates((prev) => {
+            const next = new Map(prev);
+            next.set(blockId, {
+              ...block,
+              type: 'text',
+              type_id: 'text',
+              content: '',
+              blockConfig: {},
+            });
+            return next;
+          });
+        } else {
+          // Update real block
+          setBlocks((prevBlocks) =>
+            prevBlocks.map((b) =>
+              b.id === blockId
+                ? { ...b, type: 'text', type_id: 'text', content: '', blockConfig: {} }
+                : b
+            )
+          );
+
+          // Enqueue update
+          if (syncQueueRef.current) {
+            syncQueueRef.current.enqueue({
+              id: `update-${blockId}-${Date.now()}`,
+              type: 'update',
+              blockId: blockId,
+              data: {
+                type: 'text',
+                content: '',
+                blockConfig: {},
+              },
+              timestamp: Date.now(),
+              priority: 'normal',
+            });
+          }
+        }
+        return; // Don't delete, just cleared
+      }
+
+      console.log('[handleBackspace] Proceeding with deletion');
+
+
       if (block.id.startsWith('temp-')) {
+        console.log('[handleBackspace] Deleting temp block');
         // Remove pending block - single state update
         setPendingCreates((prev) => {
           const next = new Map(prev);
@@ -554,6 +802,7 @@ export function PageEditor({ pageId }: PageEditorProps) {
           syncQueueRef.current.dequeue(blockId);
         }
       } else {
+        console.log('[handleBackspace] Deleting real block');
         // Optimistic delete - single state update combining all changes
         setBlocks((prevBlocks) => prevBlocks.filter((b) => b.id !== blockId));
 
@@ -570,8 +819,12 @@ export function PageEditor({ pageId }: PageEditorProps) {
         }
       }
 
-      // Focus on previous block - combine state updates
+      // Focus on previous block OR next block (if first block is deleted)
+      console.log('[handleBackspace] Focusing logic - hasPrevBlock:', !!prevBlock, 'blockIndex:', blockIndex, 'totalBlocks:', allBlocks.length);
+
       if (prevBlock) {
+        console.log('[handleBackspace] Focusing on previous block:', prevBlock.id);
+        // Standard case: focus on previous block
         const prevContent = prevBlock.content || '';
         setFocusedBlockId(prevBlock.id);
         setCursorPositions((prev) => {
@@ -586,8 +839,36 @@ export function PageEditor({ pageId }: PageEditorProps) {
           if (blockElement) {
             const editor = blockElement.querySelector<HTMLElement>('[contenteditable]');
             editor?.focus();
+            console.log('[handleBackspace] Focused on previous block editor');
+          } else {
+            console.log('[handleBackspace] Previous block element not found');
           }
         });
+      } else if (blockIndex < allBlocks.length - 1) {
+        // FIXED: When deleting first block, focus on next block instead
+        const nextBlock = allBlocks[blockIndex + 1];
+        console.log('[handleBackspace] Focusing on next block:', nextBlock?.id);
+        if (nextBlock) {
+          setFocusedBlockId(nextBlock.id);
+          setCursorPositions((prev) => {
+            const next = new Map(prev);
+            next.set(nextBlock.id, 0); // Focus at start of next block
+            return next;
+          });
+
+          queueMicrotask(() => {
+            const blockElement = blockRefsMap.current.get(nextBlock.id);
+            if (blockElement) {
+              const editor = blockElement.querySelector<HTMLElement>('[contenteditable]');
+              editor?.focus();
+              console.log('[handleBackspace] Focused on next block editor');
+            } else {
+              console.log('[handleBackspace] Next block element not found');
+            }
+          });
+        }
+      } else {
+        console.log('[handleBackspace] No block to focus on - last block deleted?');
       }
     },
     [getAllBlocks]
@@ -1097,44 +1378,40 @@ export function PageEditor({ pageId }: PageEditorProps) {
         </div>
       )}
 
-      {allBlocks.map((block, index) => (
-        <div
-          key={block.id}
-          ref={(el) => {
-            if (el) blockRefsMap.current.set(block.id, el);
-          }}
-          draggable={true}
-          onDragStart={() => handleDragStart(block.id)}
-          onDragOver={(e) => handleDragOver(e, block.id)}
-          onDragLeave={(e) => handleDragLeave(e)}
-          onDrop={(e) => handleDrop(e, block.id)}
-          className={`block-editor-item transition-all duration-150 ${draggedBlockId === block.id ? 'opacity-50 cursor-grabbing' : ''
-            } ${dragOverBlockId === block.id ? 'border-t-2 border-blue-400 bg-blue-50' : ''
-            }`}
-          style={{
-            border: dragOverBlockId === block.id ? 'none' : 'none',
-            outline: 'none',
-            boxShadow: 'none',
-          }}
-        >
-          <InlineBlockEditor
+      {/* Render only top-level blocks (blocks without parent_block_id) 
+          Child blocks will be recursively rendered by BlockWithChildren
+      */}
+      {allBlocks
+        .filter(block => !block.parent_block_id) // Only top-level blocks
+        .map((block) => (
+          <BlockWithChildren
+            key={block.id}
             block={block}
-            isFocused={focusedBlockId === block.id}
+            allBlocks={allBlocks}
+            focusedBlockId={focusedBlockId}
+            cursorPositions={cursorPositions}
+            draggedBlockId={draggedBlockId}
+            dragOverBlockId={dragOverBlockId}
+            blockRefsMap={blockRefsMap}
             onContentChange={handleContentChange}
             onEnter={handleEnter}
             onBackspace={handleBackspace}
             onMerge={handleMerge}
             onTypeChange={handleTypeChange}
-            onFocus={() => setFocusedBlockId(block.id)}
-            onArrowUp={() => handleArrowUp(block.id)}
-            onArrowDown={() => handleArrowDown(block.id)}
-            autoFocus={index === allBlocks.length - 1 && block.id.startsWith('temp-')}
-            restoreCursorPosition={cursorPositions.get(block.id) ?? null}
+            onIndent={handleIndent}
+            onOutdent={handleOutdent}
+            onFocus={setFocusedBlockId}
+            onArrowUp={handleArrowUp}
+            onArrowDown={handleArrowDown}
             onUpdateBlock={handleUpdateBlock}
-            listNumber={calculateListNumber(block.id)}
+            onDragStart={handleDragStart}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            calculateListNumber={calculateListNumber}
+            indentLevel={0}
           />
-        </div>
-      ))}
+        ))}
 
       {/* Empty state - create first block */}
       {allBlocks.length === 0 && !isLoading && (

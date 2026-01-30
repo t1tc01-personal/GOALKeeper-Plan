@@ -19,7 +19,7 @@ import (
 )
 
 type BlockService interface {
-	CreateBlock(ctx context.Context, pageID uuid.UUID, blockType *model.BlockType, content *string, position int64) (*model.Block, error)
+	CreateBlock(ctx context.Context, pageID uuid.UUID, blockType *model.BlockType, content *string, position int64, parentBlockID *uuid.UUID) (*model.Block, error)
 	GetBlockTypeByName(ctx context.Context, name string) (*model.BlockType, error)
 	GetBlock(ctx context.Context, id uuid.UUID) (*model.Block, error)
 	ListBlocksByPage(ctx context.Context, pageID uuid.UUID) ([]*model.Block, error)
@@ -73,7 +73,7 @@ func NewBlockService(opts ...BlockServiceOption) (BlockService, error) {
 	return s, nil
 }
 
-func (s *blockService) CreateBlock(ctx context.Context, pageID uuid.UUID, blockType *model.BlockType, content *string, position int64) (*model.Block, error) {
+func (s *blockService) CreateBlock(ctx context.Context, pageID uuid.UUID, blockType *model.BlockType, content *string, position int64, parentBlockID *uuid.UUID) (*model.Block, error) {
 	// Validate inputs
 	if err := validation.ValidateUUID(pageID, "page_id"); err != nil {
 		return nil, err
@@ -84,11 +84,12 @@ func (s *blockService) CreateBlock(ctx context.Context, pageID uuid.UUID, blockT
 	}
 
 	block := &model.Block{
-		PageID:   pageID,
-		TypeID:   blockType.ID,
-		Content:  content,
-		Rank:     position,
-		Metadata: make(model.JSONBMap),
+		PageID:        pageID,
+		TypeID:        blockType.ID,
+		Content:       content,
+		Rank:          position,
+		ParentBlockID: parentBlockID,
+		Metadata:      make(model.JSONBMap),
 	}
 
 	if err := s.repo.Create(ctx, block); err != nil {
@@ -304,7 +305,21 @@ func (s *blockService) BatchSync(ctx context.Context, req *dto.BatchSyncRequest)
 			content = &createItem.Content
 		}
 
-		block, err := s.CreateBlock(ctx, pageID, blockType, content, int64(createItem.Position))
+		var parentBlockID *uuid.UUID
+		if createItem.ParentBlockID != "" {
+			parsedID, err := uuid.Parse(createItem.ParentBlockID)
+			if err != nil {
+				response.Errors = append(response.Errors, dto.BatchError{
+					OperationID: createItem.TempID,
+					Type:        "create",
+					Error:       fmt.Sprintf("invalid parent block ID: %v", err),
+				})
+				continue
+			}
+			parentBlockID = &parsedID
+		}
+
+		block, err := s.CreateBlock(ctx, pageID, blockType, content, int64(createItem.Position), parentBlockID)
 		if err != nil {
 			response.Errors = append(response.Errors, dto.BatchError{
 				OperationID: createItem.TempID,
@@ -324,17 +339,23 @@ func (s *blockService) BatchSync(ctx context.Context, req *dto.BatchSyncRequest)
 			typeName = block.BlockType.Name
 		}
 
+		var parentID string
+		if block.ParentBlockID != nil {
+			parentID = block.ParentBlockID.String()
+		}
+
 		response.Creates = append(response.Creates, dto.BatchCreateResponse{
 			TempID: createItem.TempID,
 			Block: dto.BlockResponse{
-				ID:          block.ID.String(),
-				PageID:      block.PageID.String(),
-				Type:        typeName,
-				Content:     blockContent,
-				Position:    int(block.Rank),
-				BlockConfig: block.Metadata,
-				CreatedAt:   block.CreatedAt,
-				UpdatedAt:   block.UpdatedAt,
+				ID:            block.ID.String(),
+				PageID:        block.PageID.String(),
+				Type:          typeName,
+				Content:       blockContent,
+				Position:      int(block.Rank),
+				ParentBlockID: parentID,
+				BlockConfig:   block.Metadata,
+				CreatedAt:     block.CreatedAt,
+				UpdatedAt:     block.UpdatedAt,
 			},
 		})
 	}
@@ -434,17 +455,25 @@ func (s *blockService) BatchSync(ctx context.Context, req *dto.BatchSyncRequest)
 			typeName = updatedBlock.BlockType.Name
 		}
 
+
+
+		var parentID string
+		if updatedBlock.ParentBlockID != nil {
+			parentID = updatedBlock.ParentBlockID.String()
+		}
+
 		response.Updates = append(response.Updates, dto.BatchUpdateResponse{
 			ID: updateItem.ID,
 			Block: dto.BlockResponse{
-				ID:          updatedBlock.ID.String(),
-				PageID:      updatedBlock.PageID.String(),
-				Type:        typeName,
-				Content:     blockContent,
-				Position:    int(updatedBlock.Rank),
-				BlockConfig: updatedBlock.Metadata,
-				CreatedAt:   updatedBlock.CreatedAt,
-				UpdatedAt:   updatedBlock.UpdatedAt,
+				ID:            updatedBlock.ID.String(),
+				PageID:        updatedBlock.PageID.String(),
+				Type:          typeName,
+				Content:       blockContent,
+				Position:      int(updatedBlock.Rank),
+				ParentBlockID: parentID,
+				BlockConfig:   updatedBlock.Metadata,
+				CreatedAt:     updatedBlock.CreatedAt,
+				UpdatedAt:     updatedBlock.UpdatedAt,
 			},
 		})
 	}

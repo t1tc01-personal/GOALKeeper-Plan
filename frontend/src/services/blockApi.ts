@@ -21,11 +21,11 @@ const API_BASE_URL = getApiBaseUrl();
 // Helper to get authentication token
 function getAuthToken(): string | null {
   if (typeof window === 'undefined') return null;
-  
+
   // Try to get from cookie first (preferred method)
   const cookieToken = getAuthTokenClient();
   if (cookieToken) return cookieToken;
-  
+
   // Fallback to auth store
   try {
     const authStore = useAuthStore.getState();
@@ -66,6 +66,7 @@ export interface CreateBlockRequest {
   type: string;
   content?: string;
   position: number;
+  parent_block_id?: string | null;
   blockConfig?: Record<string, any>;
 }
 
@@ -73,6 +74,7 @@ export interface UpdateBlockRequest {
   content?: string;
   type?: string;
   position?: number;
+  parent_block_id?: string | null;
   blockConfig?: Record<string, any>;
 }
 
@@ -87,6 +89,7 @@ export interface BatchSyncRequest {
     type: string;
     content?: string;
     position: number;
+    parent_block_id?: string | null;
     blockConfig?: Record<string, any>;
     tempId: string;
   }>;
@@ -95,6 +98,7 @@ export interface BatchSyncRequest {
     content?: string;
     type?: string;
     position?: number;
+    parent_block_id?: string | null;
     blockConfig?: Record<string, any>;
   }>;
   deletes?: string[];
@@ -147,19 +151,19 @@ class BlockApiClient {
     // Get baseUrl at runtime to ensure it's correct
     const baseUrl = this.baseUrl || getApiBaseUrl();
     const url = `${baseUrl}${cleanEndpoint}`;
-    
+
     // Debug logging (remove in production)
     if (process.env.NODE_ENV === 'development') {
       console.log('[API Request]', options.method || 'GET', url);
       console.log('[API Base URL]', baseUrl);
       console.log('[API Endpoint]', cleanEndpoint);
     }
-    
+
     // Build headers
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
-    
+
     // Merge existing headers if provided
     if (options.headers) {
       if (options.headers instanceof Headers) {
@@ -182,7 +186,7 @@ class BlockApiClient {
         });
       }
     }
-    
+
     // Add Authorization header with Bearer token
     const token = getAuthToken();
     if (token) {
@@ -195,7 +199,7 @@ class BlockApiClient {
         console.warn('[API Auth] No token found - request may fail with 401');
       }
     }
-    
+
     // Try to get user ID from auth store for X-User-ID header (if needed by backend)
     if (typeof window !== 'undefined') {
       try {
@@ -208,14 +212,14 @@ class BlockApiClient {
         // Ignore errors
       }
     }
-    
+
     const response = await fetch(url, {
       ...options,
       headers: headers as HeadersInit,
     });
 
     const data = await response.json() as ApiResponse<T>;
-    
+
     if (!response.ok || !data.success) {
       throw new Error(data.error?.message || data.message || 'API request failed');
     }
@@ -231,6 +235,7 @@ class BlockApiClient {
       position: req.position,
     };
     if (req.content !== undefined) requestBody.content = req.content;
+    if (req.parent_block_id !== undefined) requestBody.parent_block_id = req.parent_block_id;
     if (req.blockConfig !== undefined) requestBody.blockConfig = req.blockConfig;
 
     const response = await this.request<Block>('/notion/blocks', {
@@ -257,6 +262,7 @@ class BlockApiClient {
     if (req.content !== undefined) requestBody.content = req.content;
     if (req.type !== undefined) requestBody.type = req.type;
     if (req.position !== undefined) requestBody.position = req.position;
+    if (req.parent_block_id !== undefined) requestBody.parent_block_id = req.parent_block_id;
     if (req.blockConfig !== undefined) requestBody.blockConfig = req.blockConfig;
 
     const response = await this.request<Block>(`/notion/blocks/${id}`, {
@@ -288,7 +294,7 @@ class BlockApiClient {
       method: 'POST',
       body: JSON.stringify(req),
     });
-    
+
     // Normalize blocks in response
     const normalizedResponse: BatchSyncResponse = {
       creates: (response.data?.creates || []).map((create) => ({
@@ -302,7 +308,7 @@ class BlockApiClient {
       deletes: response.data?.deletes || [],
       errors: response.data?.errors,
     };
-    
+
     return normalizedResponse;
   }
 }

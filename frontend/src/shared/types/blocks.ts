@@ -86,7 +86,7 @@ export const CONTENT_BLOCK_TYPES: BlockTypeConfig[] = [
     description: 'Basic checklist (different from advanced Task)',
     icon: CheckSquare,
     category: 'content',
-    defaultMetadata: { items: [], checked: [] },
+    defaultMetadata: { checked: false },
   },
   {
     name: 'toggle',
@@ -103,6 +103,22 @@ export const CONTENT_BLOCK_TYPES: BlockTypeConfig[] = [
     icon: Info,
     category: 'content',
     defaultMetadata: { icon: 'info', color: 'blue' },
+  },
+  {
+    name: 'quote',
+    displayName: 'Quote',
+    description: 'Quote block',
+    icon: Quote,
+    category: 'content',
+    defaultMetadata: {},
+  },
+  {
+    name: 'divider',
+    displayName: 'Divider',
+    description: 'Horizontal divider line',
+    icon: Minus,
+    category: 'content',
+    defaultMetadata: {},
   },
 ];
 

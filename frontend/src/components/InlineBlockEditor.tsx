@@ -6,14 +6,33 @@ import { SlashCommandMenu } from './SlashCommandMenu';
 import { type BlockTypeConfig } from '@/shared/types/blocks';
 import {
   Type, Heading1, Heading2, Heading3, List, ListOrdered,
-  CheckSquare, ChevronRight, Info
+  CheckSquare, ChevronRight, ChevronDown, Info,
+  AlertCircle, CheckCircle, XCircle, Lightbulb,
+  Quote, Minus
 } from 'lucide-react';
+
+const CALLOUT_ICONS: Record<string, React.ReactNode> = {
+  info: <Info className="w-5 h-5" />,
+  warning: <AlertCircle className="w-5 h-5" />,
+  success: <CheckCircle className="w-5 h-5" />,
+  error: <XCircle className="w-5 h-5" />,
+  lightbulb: <Lightbulb className="w-5 h-5" />,
+};
+
+const CALLOUT_COLORS: Record<string, string> = {
+  blue: 'bg-blue-50 border-blue-200 text-blue-900',
+  yellow: 'bg-yellow-50 border-yellow-200 text-yellow-900',
+  green: 'bg-green-50 border-green-200 text-green-900',
+  red: 'bg-red-50 border-red-200 text-red-900',
+  purple: 'bg-purple-50 border-purple-200 text-purple-900',
+  gray: 'bg-gray-50 border-gray-200 text-gray-900',
+};
 
 interface InlineBlockEditorProps {
   readonly block: Block;
   readonly isFocused: boolean;
   readonly onContentChange: (blockId: string, content: string) => void;
-  readonly onEnter: (blockId: string) => void;
+  readonly onEnter: (blockId: string, content?: string) => void;
   readonly onBackspace: (blockId: string) => void;
   readonly onMerge?: (blockId: string) => void;
   readonly onTypeChange?: (blockId: string, newType: string) => void;
@@ -26,6 +45,8 @@ interface InlineBlockEditorProps {
   readonly restoreCursorPosition?: number | null;
   readonly onUpdateBlock?: (blockId: string, data: { content?: string; type?: string; blockConfig?: Record<string, any> }) => void;
   readonly listNumber?: number; // For numbered_list: the item number (1, 2, 3, ...)
+  readonly onIndent?: (blockId: string) => void;
+  readonly onOutdent?: (blockId: string) => void;
 }
 
 export function InlineBlockEditor({
@@ -37,6 +58,8 @@ export function InlineBlockEditor({
   onMerge,
   onTypeChange,
   onDelete,
+  onIndent,
+  onOutdent,
   onFocus,
   onBlur,
   onArrowUp,
@@ -67,23 +90,61 @@ export function InlineBlockEditor({
       // Nội dung từ props
       const incomingContent = block.content || '';
 
-      // Trường hợp 1: Block không focused -> Cập nhật thoải mái
-      // Trường hợp 2: Block đang focused NHƯNG nội dung DOM khác với nội dung Props 
-      // VÀ nội dung Props khác với nội dung ta vừa DB (để tránh feedback loop)
-      if (currentDOMContent !== incomingContent) {
-        if (!isFocused || incomingContent !== lastKnownContentRef.current) {
-          editorRef.current.textContent = incomingContent;
+      // CRITICAL: Only update DOM if:
+      // 1. Block is NOT focused (user is not typing)
+      // 2. OR incoming content is different from what we last sent
+      //    (to handle external updates like sync from server)
+
+      // If block is focused, NEVER overwrite - user is typing
+      if (isFocused) {
+        // Update internal refs but don't touch DOM
+        if (incomingContent !== lastKnownContentRef.current) {
+          console.log('[InlineBlockEditor] Block focused, updating refs only. BlockId:', block.id);
           lastSyncedContentRef.current = incomingContent;
           setContent(incomingContent);
+          // Update lastKnownContentRef to match so we don't keep updating
+          lastKnownContentRef.current = incomingContent;
         }
+        return;
+      }
+
+      // Block not focused - safe to update DOM if content differs
+      if (currentDOMContent !== incomingContent) {
+        console.log('[InlineBlockEditor] Updating DOM content. BlockId:', block.id, 'from:', currentDOMContent, 'to:', incomingContent);
+        editorRef.current.textContent = incomingContent;
+        lastSyncedContentRef.current = incomingContent;
+        lastKnownContentRef.current = incomingContent;
+        setContent(incomingContent);
       }
     }
-  }, [block.content, isFocused]);
+  }, [block.content, isFocused, block.id]);
 
   // Cleanup on unmount (no longer using debounced save)
 
   // Handle content change - sử dụng uncontrolled component pattern
+  // Handle content change - sử dụng uncontrolled component pattern
   const handleContentChange = (newContent: string) => {
+    // CRITICAL FIX: Prevent clearing content during Enter key processing
+    // When user presses Enter, browser may trigger onInput with empty content before
+    // handleEnter completes. This causes content loss.
+    // 
+    // IMPORTANT: This check should ONLY apply during Enter key processing, NOT during
+    // normal Backspace deletion! We need to allow syncing when user intentionally deletes content.
+    //
+    // The issue: When user types "1" and presses Backspace to delete it, the content becomes ""
+    // which is a legitimate change that MUST be synced. The previous code blocked this.
+    //
+    // Solution: Remove this overly aggressive check. The real fix for Enter key race should be
+    // in handleEnter where we explicitly pass the current content, not here.
+    // if (newContent === '' && lastKnownContentRef.current && lastKnownContentRef.current.length > 0) {
+    //   // Restore content from ref to prevent loss
+    //   if (editorRef.current && editorRef.current.textContent === '') {
+    //     editorRef.current.textContent = lastKnownContentRef.current;
+    //   }
+    //   return; // Don't process this spurious empty update
+    // }
+
+
     const currentType = block.type_id || block.type || 'text';
 
     // Auto-detect numbered list pattern: "1. " at start (only for text blocks)
@@ -174,12 +235,25 @@ export function InlineBlockEditor({
       return;
     }
 
+    // Tab: Indent / Outdent
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      if (e.shiftKey) {
+        if (onOutdent) onOutdent(block.id);
+      } else {
+        if (onIndent) onIndent(block.id);
+      }
+      return;
+    }
+
     // Enter: Always create new block (Notion-style)
     // This is the default behavior - Enter = new block
     if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
       e.preventDefault();
-      // Cursor position will be saved by PageEditor before creating new block
-      onEnter(block.id);
+      // Pass the CURRENT authentic content to onEnter
+      // This prevents the parent from reading a potentially cleared DOM
+      const currentContent = editorRef.current?.textContent ?? lastKnownContentRef.current ?? '';
+      onEnter(block.id, currentContent);
       return;
     }
 
@@ -525,6 +599,361 @@ export function InlineBlockEditor({
           </div>
         );
 
+      case 'todo_list':
+        // Get checked state from metadata or blockConfig
+        const isChecked = block.blockConfig?.checked || block.metadata?.checked || false;
+
+        // Handle checkbox toggle
+        const handleToggleCheckbox = (e: React.MouseEvent) => {
+          e.preventDefault();
+          e.stopPropagation();
+
+          if (onUpdateBlock) {
+            const newChecked = !isChecked;
+            onUpdateBlock(block.id, {
+              blockConfig: { checked: newChecked },
+            });
+          }
+        };
+
+        // Override handleKeyDown for todo-specific shortcuts
+        const handleTodoKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+          // Ctrl/Cmd + Enter: Toggle checkbox
+          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (onUpdateBlock) {
+              const newChecked = !isChecked;
+              onUpdateBlock(block.id, {
+                blockConfig: { checked: newChecked },
+              });
+            }
+            return;
+          }
+
+          // Delegate to normal keydown handler for other keys
+          handleKeyDown(e);
+        };
+
+        return (
+          <div className="flex items-center gap-2 w-full">
+            {/* Checkbox */}
+            <button
+              type="button"
+              onClick={handleToggleCheckbox}
+              className="flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-0 rounded"
+              aria-label={isChecked ? "Mark as incomplete" : "Mark as complete"}
+              tabIndex={-1} // Don't steal focus from editor
+            >
+              <div
+                className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-all ${isChecked
+                  ? 'bg-blue-500 border-blue-500'
+                  : 'border-gray-300 hover:border-gray-400'
+                  }`}
+              >
+                {isChecked && (
+                  <svg
+                    className="w-3 h-3 text-white"
+                    fill="none"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path d="M5 13l4 4L19 7" />
+                  </svg>
+                )}
+              </div>
+            </button>
+
+            {/* Editor */}
+            <div className="flex-1 relative">
+              <div
+                ref={editorRef}
+                contentEditable
+                suppressContentEditableWarning
+                role="textbox"
+                tabIndex={0}
+                aria-label="Todo item"
+                onInput={(e) => {
+                  const newContent = e.currentTarget.textContent || '';
+                  handleContentChange(newContent);
+                }}
+                onKeyDown={handleTodoKeyDown}
+                onFocus={onFocus}
+                onBlur={onBlur}
+                className={`${baseClass} ${isChecked ? 'line-through text-gray-400' : ''} transition-all`}
+                data-placeholder="To-do"
+                style={{
+                  minHeight: '1.5rem',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  border: 'none',
+                  outline: 'none',
+                  boxShadow: 'none',
+                }}
+              />
+
+              {/* Placeholder */}
+              {!content && (
+                <div
+                  className="absolute left-2 top-1 text-gray-400 pointer-events-none"
+                  style={{ fontSize: 'inherit' }}
+                >
+                  To-do
+                </div>
+              )}
+            </div>
+          </div>
+        );
+
+      case 'divider':
+        return (
+          <div className="flex items-center gap-2 w-full py-1 relative group">
+            {/* Icon - show on hover */}
+            <div className="opacity-0 group-hover:opacity-100 transition-opacity absolute -left-6">
+              {getBlockIcon('divider')}
+            </div>
+
+            <div className="flex-1 flex items-center justify-center h-6">
+              <hr className="w-full border-gray-300" />
+            </div>
+
+            {/* Hidden editor just to capture focus/selection */}
+            <div
+              ref={editorRef}
+              contentEditable
+              suppressContentEditableWarning
+              role="textbox"
+              tabIndex={0}
+              aria-label="Divider"
+              onKeyDown={handleKeyDown}
+              onFocus={onFocus}
+              onBlur={onBlur}
+              className="absolute inset-0 opacity-0 cursor-default"
+            />
+          </div>
+        );
+
+      case 'quote':
+        return (
+          <div className="flex items-start gap-2 w-full">
+            {/* Block type icon - show on hover */}
+            <div className="opacity-0 group-hover:opacity-100 transition-opacity pt-1">
+              {getBlockIcon('quote')}
+            </div>
+
+            <div className="flex-1 relative pl-4 border-l-4 border-gray-900 bg-gray-50 py-2 rounded-r">
+              <div
+                ref={editorRef}
+                contentEditable
+                suppressContentEditableWarning
+                role="textbox"
+                tabIndex={0}
+                aria-label="Quote"
+                onInput={(e) => {
+                  const newContent = e.currentTarget.textContent || '';
+                  handleContentChange(newContent);
+                }}
+                onKeyDown={handleKeyDown}
+                onFocus={onFocus}
+                onBlur={onBlur}
+                className={`${baseClass} italic text-lg text-gray-700`}
+                data-placeholder="Quote"
+                style={{
+                  minHeight: '1.5rem',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  border: 'none',
+                  outline: 'none',
+                  boxShadow: 'none',
+                }}
+              />
+
+              {/* Placeholder */}
+              {!content && (
+                <div
+                  className="absolute left-4 top-2 text-gray-400 pointer-events-none italic text-lg"
+                  style={{ fontSize: 'inherit' }}
+                >
+                  Quote
+                </div>
+              )}
+            </div>
+          </div>
+        );
+
+      case 'callout':
+        const iconType = block.blockConfig?.icon || block.metadata?.icon || 'info';
+        const colorType = block.blockConfig?.color || block.metadata?.color || 'blue';
+        const colorClasses = CALLOUT_COLORS[colorType] || CALLOUT_COLORS.blue;
+        const IconComponent = CALLOUT_ICONS[iconType] || CALLOUT_ICONS.info;
+
+        return (
+          <div className={`flex items-start gap-3 w-full border-l-4 rounded p-4 ${colorClasses} my-1`}>
+            <div className="flex-shrink-0 mt-0.5 select-none">
+              {IconComponent}
+            </div>
+
+            <div className="flex-1 relative">
+              <div
+                ref={editorRef}
+                contentEditable
+                suppressContentEditableWarning
+                role="textbox"
+                tabIndex={0}
+                aria-label="Callout"
+                onInput={(e) => {
+                  const newContent = e.currentTarget.textContent || '';
+                  handleContentChange(newContent);
+                }}
+                onKeyDown={handleKeyDown}
+                onFocus={onFocus}
+                onBlur={onBlur}
+                className={`${baseClass} bg-transparent border-none outline-none focus:ring-0`}
+                data-placeholder="Callout text..."
+                style={{
+                  minHeight: '1.5rem',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  border: 'none',
+                  outline: 'none',
+                  boxShadow: 'none',
+                }}
+              />
+
+              {/* Placeholder */}
+              {!content && (
+                <div
+                  className="absolute left-0 top-0 opacity-50 pointer-events-none"
+                  style={{ fontSize: 'inherit' }}
+                >
+                  Callout text...
+                </div>
+              )}
+            </div>
+          </div>
+        );
+
+      case 'toggle':
+        const isCollapsed = block.blockConfig?.collapsed ?? block.metadata?.collapsed ?? false;
+
+        if (process.env.NODE_ENV === 'development') {
+          console.log('[Toggle Render]', {
+            blockId: block.id,
+            isCollapsed,
+            blockConfig: block.blockConfig,
+            metadata: block.metadata,
+          });
+        }
+
+        const handleToggle = (e: React.MouseEvent) => {
+          e.preventDefault();
+          e.stopPropagation();
+
+          const newCollapsed = !isCollapsed;
+
+          console.log('[Toggle Click] EVENT FIRED!', {
+            blockId: block.id,
+            from: isCollapsed,
+            to: newCollapsed,
+            currentConfig: block.blockConfig,
+            timestamp: new Date().toISOString(),
+          });
+
+          if (onUpdateBlock) {
+            // Optimistic UI: Merge với existing config để không mất data khác
+            const updatedConfig = {
+              ...(block.blockConfig || {}),
+              collapsed: newCollapsed,
+            };
+
+            console.log('[Toggle] Calling onUpdateBlock with:', {
+              blockId: block.id,
+              updatedConfig,
+            });
+
+            onUpdateBlock(block.id, {
+              blockConfig: updatedConfig,
+            });
+
+            console.log('[Toggle] onUpdateBlock called - done');
+          } else {
+            console.error('[Toggle Error] onUpdateBlock is NOT defined!');
+          }
+        };
+
+        return (
+          <div className="flex flex-col w-full">
+            {/* Header Row - Toggle text is ALWAYS visible (Notion-style) */}
+            <div className="flex items-start gap-2 w-full min-h-[1.5rem] group/toggle">
+              {/* Chevron button - rotates to indicate collapsed/expanded state */}
+              <div className="pt-0.5 select-none transition-opacity opacity-70 group-hover/toggle:opacity-100" unselectable="on">
+                <button
+                  type="button"
+                  onMouseDown={(e) => {
+                    // Use onMouseDown instead of onClick to prevent contentEditable focus issues
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handleToggle(e);
+                  }}
+                  className="p-1 rounded hover:bg-gray-200 active:bg-gray-300 text-gray-600 transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
+                  contentEditable={false}
+                  suppressContentEditableWarning
+                  tabIndex={-1}
+                  aria-label={isCollapsed ? "Expand toggle" : "Collapse toggle"}
+                  aria-expanded={!isCollapsed}
+                  unselectable="on"
+                >
+                  <ChevronRight
+                    className={`w-4 h-4 transition-transform duration-200 ease-out ${!isCollapsed ? 'rotate-90' : ''}`}
+                  />
+                </button>
+              </div>
+
+              {/* Toggle content - ALWAYS visible, never hidden */}
+              <div className="flex-1 relative">
+                <div
+                  ref={editorRef}
+                  contentEditable
+                  suppressContentEditableWarning
+                  role="textbox"
+                  tabIndex={0}
+                  aria-label="Toggle block"
+                  onInput={(e) => {
+                    const newContent = e.currentTarget.textContent || '';
+                    handleContentChange(newContent);
+                  }}
+                  onKeyDown={handleKeyDown}
+                  onFocus={onFocus}
+                  onBlur={onBlur}
+                  className={`${baseClass}`}
+                  data-placeholder="Toggle"
+                  style={{
+                    // Toggle text is ALWAYS fully visible - no clipping or hiding
+                    minHeight: '1.5rem',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                  }}
+                />
+
+                {/* Placeholder */}
+                {!content && (
+                  <div className="absolute left-2 top-1 text-gray-400 pointer-events-none">
+                    Toggle
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Note: Child blocks will be rendered by parent component (PageEditor)
+                The collapsed state only affects whether child blocks are shown.
+                This block itself (toggle header text) is ALWAYS visible.
+            */}
+          </div>
+        );
+
       case 'text':
       default:
         return (
@@ -740,13 +1169,20 @@ export function InlineBlockEditor({
   }, [block.id]); // Chạy khi ID thay đổi (remount/transition)
 
   const blockType = block.type_id || block.type || 'text';
-  const isListType = blockType === 'numbered_list' || blockType === 'bulleted_list';
+  const isSelfContained =
+    blockType === 'numbered_list' ||
+    blockType === 'bulleted_list' ||
+    blockType === 'todo_list' ||
+    blockType === 'divider' ||
+    blockType === 'quote' ||
+    blockType === 'callout' ||
+    blockType === 'toggle';
 
   return (
     <div className="relative group">
-      {/* For list types, renderBlock() already includes icon and structure */}
-      {/* For other types, wrap with icon and placeholder */}
-      {isListType ? (
+      {/* For self-contained types, renderBlock() already includes icon and structure */}
+      {/* For other types (text, headings), wrap with icon and placeholder */}
+      {isSelfContained ? (
         renderBlock()
       ) : (
         <div className="flex items-start gap-2">
@@ -814,6 +1250,10 @@ function getBlockIcon(type: string) {
       return <ChevronRight className={iconClass} />;
     case 'callout':
       return <Info className={iconClass} />;
+    case 'quote':
+      return <Quote className={iconClass} />;
+    case 'divider':
+      return <Minus className={iconClass} />;
     default:
       return <Type className={iconClass} />;
   }
@@ -830,6 +1270,14 @@ function getPlaceholder(type: string): string {
     case 'numbered_list':
     case 'bulleted_list':
       return 'List item';
+    case 'todo_list':
+      return 'To-do';
+    case 'quote':
+      return 'Quote';
+    case 'toggle':
+      return 'Toggle';
+    case 'callout':
+      return 'Callout';
     case 'text':
     default:
       return "Type '/' for commands";

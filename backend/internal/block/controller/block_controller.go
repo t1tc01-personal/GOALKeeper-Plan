@@ -67,7 +67,20 @@ func (c *blockController) CreateBlock(ctx *gin.Context) {
 			content = &req.Content
 		}
 
-		block, err := c.blockService.CreateBlock(ctx, pageID, blockType, content, int64(req.Position))
+		var parentBlockID *uuid.UUID
+		if req.ParentBlockID != "" {
+			parsedID, err := uuid.Parse(req.ParentBlockID)
+			if err != nil {
+				return nil, errors.NewValidationError(
+					errors.CodeInvalidID,
+					blockMessages.MsgInvalidBlockID, // Reuse or add MsgInvalidParentBlockID
+					err,
+				)
+			}
+			parentBlockID = &parsedID
+		}
+
+		block, err := c.blockService.CreateBlock(ctx, pageID, blockType, content, int64(req.Position), parentBlockID)
 		if err != nil {
 			c.logger.Error("Failed to create block", zap.Error(err), zap.String("page_id", req.PageID))
 			return nil, errors.NewInternalError(
@@ -190,15 +203,21 @@ func (c *blockController) ListBlocks(ctx *gin.Context) {
 				typeName = block.BlockType.Name
 			}
 
+			var parentID string
+			if block.ParentBlockID != nil {
+				parentID = block.ParentBlockID.String()
+			}
+
 			responses[i] = dto.BlockResponse{
-				ID:          block.ID.String(),
-				PageID:      block.PageID.String(),
-				Type:        typeName,
-				Content:     blockContent,
-				Position:    int(block.Rank),
-				BlockConfig: block.Metadata,
-				CreatedAt:   block.CreatedAt,
-				UpdatedAt:   block.UpdatedAt,
+				ID:            block.ID.String(),
+				PageID:        block.PageID.String(),
+				Type:          typeName,
+				Content:       blockContent,
+				Position:      int(block.Rank),
+				ParentBlockID: parentID,
+				BlockConfig:   block.Metadata,
+				CreatedAt:     block.CreatedAt,
+				UpdatedAt:     block.UpdatedAt,
 			}
 		}
 
@@ -250,15 +269,22 @@ func (c *blockController) UpdateBlock(ctx *gin.Context) {
 		typeName = block.BlockType.Name
 	}
 
+
+	var parentID string
+	if block.ParentBlockID != nil {
+		parentID = block.ParentBlockID.String()
+	}
+
 	api.SendSuccess(ctx, 200, blockMessages.MsgBlockUpdated, dto.BlockResponse{
-		ID:          block.ID.String(),
-		PageID:      block.PageID.String(),
-		Type:        typeName,
-		Content:     blockContent,
-		Position:    int(block.Rank),
-		BlockConfig: block.Metadata,
-		CreatedAt:   block.CreatedAt,
-		UpdatedAt:   block.UpdatedAt,
+		ID:            block.ID.String(),
+		PageID:        block.PageID.String(),
+		Type:          typeName,
+		Content:       blockContent,
+		Position:      int(block.Rank),
+		ParentBlockID: parentID,
+		BlockConfig:   block.Metadata,
+		CreatedAt:     block.CreatedAt,
+		UpdatedAt:     block.UpdatedAt,
 	})
 }
 

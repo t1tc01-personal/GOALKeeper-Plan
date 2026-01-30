@@ -7,6 +7,7 @@ type CreateBlockRequest struct {
 	Type        string         `json:"type" validate:"required,min=1"`
 	Content     string         `json:"content,omitempty"`
 	Position    int            `json:"position,omitempty"`
+	ParentBlockID string       `json:"parent_block_id,omitempty" validate:"omitempty,uuid"`
 	BlockConfig map[string]any `json:"blockConfig,omitempty"`
 }
 
@@ -27,6 +28,7 @@ type BlockResponse struct {
 	Type        string         `json:"type"`
 	Content     string         `json:"content"`
 	Position    int            `json:"position"`
+	ParentBlockID string       `json:"parent_block_id,omitempty"`
 	BlockConfig map[string]any `json:"blockConfig"`
 	CreatedAt   time.Time      `json:"created_at"`
 	UpdatedAt   time.Time      `json:"updated_at"`
@@ -38,6 +40,7 @@ type BatchCreateItem struct {
 	Type        string         `json:"type" validate:"required,min=1"`
 	Content     string         `json:"content,omitempty"`
 	Position    int            `json:"position"`
+	ParentBlockID string       `json:"parent_block_id,omitempty" validate:"omitempty,uuid"`
 	BlockConfig map[string]any `json:"blockConfig,omitempty"`
 	TempID      string         `json:"tempId" validate:"required"` // Frontend temp ID for mapping
 }

@@ -29,7 +29,7 @@ INSERT INTO block_types (name, category, display_name, description, icon, defaul
     ('heading_3', 'content', 'Heading 3', 'Sub-sub heading', 'heading-3', '{"level": 3}', true),
     ('bulleted_list', 'content', 'Bulleted List', 'Unordered list', 'list-bulleted', '{"items": []}', true),
     ('numbered_list', 'content', 'Numbered List', 'Ordered list', 'list-numbered', '{"items": []}', true),
-    ('todo_list', 'content', 'Todo List', 'Basic checklist (different from advanced Task)', 'checkbox', '{"items": [], "checked": []}', true),
+    ('todo_list', 'content', 'Todo List', 'Basic checklist (different from advanced Task)', 'checkbox', '{"checked": false}', true),
     ('toggle', 'content', 'Toggle', 'Collapsible block to hide/show content (important for Learning Roadmap)', 'toggle', '{"collapsed": false}', true),
     ('callout', 'content', 'Callout', 'Highlighted block with icon for notices', 'callout', '{"icon": "info", "color": "blue"}', true),
     ('quote', 'content', 'Quote', 'Quote block', 'quote', '{}', true),
