@@ -186,7 +186,7 @@ export function PageEditor({ pageId }: PageEditorProps) {
   useEffect(() => {
     if (!syncQueueRef.current) {
       syncQueueRef.current = new BlockSyncQueue({
-        syncInterval: 500, // Debounce for 500ms - faster persistence
+        syncInterval: 100, // Debounce for 100ms - almost immediate persistence
         maxBatchSize: 50, // Max 50 operations per batch
         maxRetries: 5, // Retry failed ops up to 5 times
         baseRetryDelay: 1000,

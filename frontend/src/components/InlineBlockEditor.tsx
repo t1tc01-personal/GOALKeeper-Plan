@@ -135,8 +135,7 @@ export function InlineBlockEditor({
     onContentChange(block.id, newContent);
 
     // Immediate sync - call onUpdateBlock directly on every keystroke
-    // (only for non-temp blocks)
-    if (!block.id.startsWith('temp-') && block.id && onUpdateBlock) {
+    if (block.id && onUpdateBlock) {
       const blockType = block.type_id || block.type || 'text';
       const currentMetadata = block.metadata || block.blockConfig || {};
       const updateData: { content?: string; type?: string; blockConfig?: Record<string, any> } = {
