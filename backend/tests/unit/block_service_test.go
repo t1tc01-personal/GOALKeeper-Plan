@@ -111,7 +111,7 @@ func TestBlockServiceCreateSuccess(t *testing.T) {
 	}).Return(nil)
 
 	// Execute
-	result, err := svc.CreateBlock(ctx, pageID, blockType, &content, 0)
+	result, err := svc.CreateBlock(ctx, pageID, blockType, &content, 0, nil)
 
 	// Assert
 	assert.NoError(t, err)
@@ -135,7 +135,7 @@ func TestBlockServiceCreateValidationError(t *testing.T) {
 	blockType := &model.BlockType{ID: uuid.New(), Name: "Paragraph"}
 
 	// Execute with nil pageID
-	result, err := svc.CreateBlock(ctx, uuid.Nil, blockType, nil, 0)
+	result, err := svc.CreateBlock(ctx, uuid.Nil, blockType, nil, 0, nil)
 
 	// Assert
 	assert.Error(t, err)
@@ -157,7 +157,7 @@ func TestBlockServiceCreateMissingBlockType(t *testing.T) {
 	content := "Test"
 
 	// Execute with nil blockType - should get validation error
-	result, err := svc.CreateBlock(ctx, pageID, nil, &content, 0)
+	result, err := svc.CreateBlock(ctx, pageID, nil, &content, 0, nil)
 
 	// Assert - should fail validation
 	assert.Error(t, err, "expected validation error for nil blockType")
@@ -181,7 +181,7 @@ func TestBlockServiceCreateRepositoryError(t *testing.T) {
 	mockRepo.On("Create", ctx, mock.Anything).Return(errors.New("database error"))
 
 	// Execute
-	result, err := svc.CreateBlock(ctx, pageID, blockType, nil, 0)
+	result, err := svc.CreateBlock(ctx, pageID, blockType, nil, 0, nil)
 
 	// Assert
 	assert.Error(t, err)
