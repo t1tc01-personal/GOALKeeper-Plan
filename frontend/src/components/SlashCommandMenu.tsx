@@ -89,10 +89,10 @@ export function SlashCommandMenu({
 
   const menuStyle = position
     ? {
-        position: 'fixed' as const,
-        top: `${position.top}px`,
-        left: `${position.left}px`,
-      }
+      position: 'fixed' as const,
+      top: `${position.top}px`,
+      left: `${position.left}px`,
+    }
     : {};
 
   return (
@@ -107,35 +107,48 @@ export function SlashCommandMenu({
           <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Basic blocks</div>
         </div>
         <div ref={listRef} className="max-h-96 overflow-y-auto p-2">
-          {CONTENT_BLOCK_TYPES.map((blockType, index) => {
-            const Icon = blockType.icon;
-            const isSelected = index === selectedIndex;
-            return (
-              <button
-                key={blockType.name}
-                ref={(el) => {
-                  if (el) {
-                    itemsRef.current.set(index, el);
-                  }
-                }}
-                onClick={() => handleSelect(blockType)}
-                onMouseEnter={() => setSelectedIndex(index)}
-                className={`w-full flex items-center gap-3 rounded-md px-3 py-2.5 text-sm cursor-pointer transition-colors mb-1 ${
-                  isSelected
-                    ? 'bg-blue-100'
-                    : 'hover:bg-gray-100'
-                }`}
-              >
-                <Icon className="h-5 w-5 text-gray-600" />
-                <div className="flex-1 text-left">
-                  <div className="font-medium text-gray-900">{blockType.displayName}</div>
-                  <div className="text-xs text-gray-500">
-                    {blockType.description}
+          {/* Basic Blocks */}
+          <div className="px-2 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Basic</div>
+          {CONTENT_BLOCK_TYPES
+            .filter(t => t.category === 'content')
+            .map((blockType, index) => {
+              const Icon = blockType.icon;
+              return (
+                <button
+                  key={blockType.name}
+                  onClick={() => handleSelect(blockType)}
+                  className="w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-gray-100 transition-colors mb-0.5"
+                >
+                  <Icon className="h-4 w-4 text-gray-500" />
+                  <div className="flex-1 text-left">
+                    <div className="font-medium text-gray-800">{blockType.displayName}</div>
                   </div>
-                </div>
-              </button>
-            );
-          })}
+                </button>
+              );
+            })}
+
+          {/* Framework Blocks */}
+          <div className="px-2 py-1 mt-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Frameworks</div>
+          {CONTENT_BLOCK_TYPES
+            .filter(t => t.category === 'framework')
+            .map((blockType) => {
+              const Icon = blockType.icon;
+              return (
+                <button
+                  key={blockType.name}
+                  onClick={() => handleSelect(blockType)}
+                  className="w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-gray-100 transition-colors mb-0.5"
+                >
+                  <div className="p-1 bg-primary/10 rounded">
+                    <Icon className="h-4 w-4 text-primary" />
+                  </div>
+                  <div className="flex-1 text-left">
+                    <div className="font-medium text-gray-800">{blockType.displayName}</div>
+                    <div className="text-[10px] text-gray-500">{blockType.description}</div>
+                  </div>
+                </button>
+              );
+            })}
         </div>
       </div>
     </div>

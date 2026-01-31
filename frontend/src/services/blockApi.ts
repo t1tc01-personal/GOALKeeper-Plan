@@ -58,6 +58,8 @@ function normalizeBlock(block: any): Block {
     type_id: block.type || block.type_id,
     // Ensure position is set
     position: block.position ?? block.rank ?? 0,
+    // Ensure metadata is populated from blockConfig (backend uses blockConfig, frontend components often use metadata)
+    metadata: block.metadata || block.blockConfig || {},
   };
 }
 

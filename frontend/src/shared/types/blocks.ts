@@ -15,6 +15,8 @@ import {
   Info,
   Quote,
   Minus,
+  Layout,
+  Calendar,
 } from 'lucide-react';
 
 export type BlockCategory = 'content' | 'framework' | 'media' | 'smart';
@@ -119,6 +121,52 @@ export const CONTENT_BLOCK_TYPES: BlockTypeConfig[] = [
     icon: Minus,
     category: 'content',
     defaultMetadata: {},
+  },
+  {
+    name: 'kanban',
+    displayName: 'Kanban Board',
+    description: 'Visual project management board',
+    icon: Layout,
+    category: 'framework',
+    defaultMetadata: {
+      framework_type: 'kanban',
+      columns: [
+        { key: 'todo', label: 'To Do', color: 'gray', position: 0 },
+        { key: 'doing', label: 'In Progress', color: 'blue', position: 1 },
+        { key: 'done', label: 'Done', color: 'green', position: 2 }
+      ]
+    },
+  },
+  {
+    name: 'habit',
+    displayName: 'Habit Tracker',
+    description: 'Track your daily progress and streaks',
+    icon: Calendar,
+    category: 'framework',
+    defaultMetadata: {
+      framework_type: 'habit',
+      display_mode: 'calendar',
+      settings: {
+        show_stats: true,
+        allow_custom_habits: true
+      }
+    },
+  },
+  {
+    name: 'task_item',
+    displayName: 'Task Item',
+    description: 'A task item within a framework',
+    icon: CheckSquare,
+    category: 'smart',
+    defaultMetadata: { status: 'todo', priority: 'medium' },
+  },
+  {
+    name: 'habit_item',
+    displayName: 'Habit Item',
+    description: 'A habit completion record',
+    icon: Calendar,
+    category: 'smart',
+    defaultMetadata: { completed: false },
   },
 ];
 

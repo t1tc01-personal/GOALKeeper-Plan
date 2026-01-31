@@ -110,34 +110,51 @@ export class BlockSyncManager {
             }
 
           } else if (op.type === 'create') {
-            // CASE: Creating a block that already has ops? (Shouldn't happen for same ID)
             if (op.status === 'syncing') {
               console.log('[BlockSyncQueue] Skipping merge into syncing create:', key);
               continue;
             }
-            // Can't update a block that's being created - keep create, update data
-            // (Handling logical merge of data)
+
+            const mergedData = { ...op.data };
+            if (operation.data) {
+              Object.keys(operation.data).forEach(k => {
+                const value = operation.data![k as keyof typeof operation.data];
+                if (value !== undefined) {
+                  (mergedData as any)[k] = value;
+                }
+              });
+            }
+
             const updatedOp: QueuedOperation = {
               ...op,
-              data: { ...op.data, ...operation.data },
-              timestamp: Date.now(), // Reset debounce
+              data: mergedData,
+              timestamp: Date.now(),
             };
             this.queue.set(key, updatedOp);
-            return; // Done
+            return;
 
           } else if (op.type === 'update' && operation.type === 'update') {
-            // CASE: coalescing updates
             if (op.status === 'syncing') {
               continue;
             }
-            // Coalesce updates
+
+            const mergedData = { ...op.data };
+            if (operation.data) {
+              Object.keys(operation.data).forEach(k => {
+                const value = operation.data![k as keyof typeof operation.data];
+                if (value !== undefined) {
+                  (mergedData as any)[k] = value;
+                }
+              });
+            }
+
             const updatedOp: QueuedOperation = {
               ...op,
-              data: { ...op.data, ...operation.data },
-              timestamp: Date.now(), // Reset debounce
+              data: mergedData,
+              timestamp: Date.now(),
             };
             this.queue.set(key, updatedOp);
-            return; // Done
+            return;
           }
         }
       }
@@ -426,6 +443,16 @@ export class BlockSyncManager {
             successfulOps.add(op.id);
             break;
           }
+        }
+      });
+
+      // KEY FIX: Automatically remap block IDs for successful creates
+      // This ensures that pending updates for this block (which are currently using tempID)
+      // are updated to use the real ID immediately, allowing them to be synced in the next batch.
+      // This handles cases where PageEditor might be unmounted (removing the external callback handler).
+      response.creates.forEach((create) => {
+        if (create.tempId && create.block.id) {
+          this.remapBlockId(create.tempId, create.block.id);
         }
       });
 

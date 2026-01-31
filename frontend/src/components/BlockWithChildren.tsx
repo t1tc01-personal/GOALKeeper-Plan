@@ -1,6 +1,7 @@
-import React from 'react';
 import { type Block } from '@/services/blockApi';
 import { InlineBlockEditor } from './InlineBlockEditor';
+import { FrameworkBlock } from './frameworks/FrameworkBlock';
+import { isFrameworkContainerBlock } from '@/shared/frameworks';
 
 interface BlockWithChildrenProps {
     block: Block;
@@ -23,6 +24,7 @@ interface BlockWithChildrenProps {
     onArrowUp: (blockId: string) => void;
     onArrowDown: (blockId: string) => void;
     onUpdateBlock: (blockId: string, data: { content?: string; type?: string; blockConfig?: Record<string, any> }) => void;
+    onCreateBlock: (afterBlockId: string, type?: string, content?: string, parentBlockId?: string | null) => Block;
     onDragStart: (blockId: string) => void;
     onDragOver: (e: React.DragEvent<HTMLDivElement>, blockId: string) => void;
     onDragLeave: (e: React.DragEvent<HTMLDivElement>) => void;
@@ -58,6 +60,7 @@ export function BlockWithChildren({
     onArrowUp,
     onArrowDown,
     onUpdateBlock,
+    onCreateBlock,
     onDragStart,
     onDragOver,
     onDragLeave,
@@ -72,6 +75,7 @@ export function BlockWithChildren({
     const blockType = block.type_id || block.type || 'text';
     const isToggle = blockType === 'toggle';
     const isCollapsed = isToggle && (block.blockConfig?.collapsed ?? block.metadata?.collapsed ?? false);
+    const isFramework = isFrameworkContainerBlock(block);
 
     // DEBUG: Log collapse state for toggles with children
     if (isToggle && childBlocks.length > 0) {
@@ -108,33 +112,69 @@ export function BlockWithChildren({
                     boxShadow: 'none',
                 }}
             >
-                <InlineBlockEditor
-                    block={block}
-                    isFocused={focusedBlockId === block.id}
-                    onContentChange={onContentChange}
-                    onEnter={onEnter}
-                    onBackspace={onBackspace}
-                    onMerge={onMerge}
-                    onTypeChange={onTypeChange}
-                    onIndent={onIndent}
-                    onOutdent={onOutdent}
-                    onFocus={() => onFocus(block.id)}
-                    onArrowUp={() => onArrowUp(block.id)}
-                    onArrowDown={() => onArrowDown(block.id)}
-                    autoFocus={false}
-                    restoreCursorPosition={cursorPositions.get(block.id) ?? null}
-                    onUpdateBlock={onUpdateBlock}
-                    listNumber={calculateListNumber(block.id)}
-                />
+                {isFramework ? (
+                    <FrameworkBlock
+                        block={block}
+                        children={childBlocks}
+                        onUpdate={(updatedBlock) => onUpdateBlock(block.id, {
+                            content: updatedBlock.content,
+                            blockConfig: updatedBlock.blockConfig
+                        })}
+                        onChildCreate={async (childData) => {
+                            console.log('[BlockWithChildren] Creating framework child:', childData);
+                            // Find the last child in this parent to insert after
+                            const lastChild = childBlocks.length > 0
+                                ? childBlocks[childBlocks.length - 1]
+                                : null;
+
+                            const newBlock = onCreateBlock(
+                                lastChild?.id || block.id,
+                                childData.type,
+                                childData.content,
+                                block.id // Explicit parent
+                            );
+
+                            // Immediately update metadata if provided
+                            if (childData.blockConfig || childData.metadata) {
+                                onUpdateBlock(newBlock.id, {
+                                    blockConfig: childData.blockConfig || childData.metadata
+                                });
+                            }
+
+                            return newBlock;
+                        }}
+                        onChildUpdate={(childBlock) => onUpdateBlock(childBlock.id, {
+                            content: childBlock.content,
+                            blockConfig: childBlock.blockConfig
+                        })}
+                        onChildDelete={(childId) => onBackspace(childId)}
+                    />
+                ) : (
+                    <InlineBlockEditor
+                        block={block}
+                        isFocused={focusedBlockId === block.id}
+                        onContentChange={onContentChange}
+                        onEnter={onEnter}
+                        onBackspace={onBackspace}
+                        onMerge={onMerge}
+                        onTypeChange={onTypeChange}
+                        onIndent={onIndent}
+                        onOutdent={onOutdent}
+                        onFocus={() => onFocus(block.id)}
+                        onArrowUp={() => onArrowUp(block.id)}
+                        onArrowDown={() => onArrowDown(block.id)}
+                        autoFocus={false}
+                        restoreCursorPosition={cursorPositions.get(block.id) ?? null}
+                        onUpdateBlock={onUpdateBlock}
+                        listNumber={calculateListNumber(block.id)}
+                    />
+                )}
             </div>
 
-            {/* Render child blocks if:
-          1. Block has children
-          2. Block is NOT a collapsed toggle
-          
-          If toggle is collapsed, children are hidden (Notion-style)
-      */}
-            {childBlocks.length > 0 && !isCollapsed && (
+            {/* Render child blocks IF it's not a framework container (framework handles its own children)
+                OR if it's a toggle that is not collapsed.
+            */}
+            {childBlocks.length > 0 && !isCollapsed && !isFramework && (
                 <div className="block-children">
                     {childBlocks
                         .sort((a, b) => (a.position || 0) - (b.position || 0))
@@ -159,6 +199,7 @@ export function BlockWithChildren({
                                 onArrowUp={onArrowUp}
                                 onArrowDown={onArrowDown}
                                 onUpdateBlock={onUpdateBlock}
+                                onCreateBlock={onCreateBlock}
                                 onDragStart={onDragStart}
                                 onDragOver={onDragOver}
                                 onDragLeave={onDragLeave}

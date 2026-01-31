@@ -3,6 +3,7 @@
 /specs/*
 /specs
 /.github
+/.agent
 
 # Binaries for programs and plugins
 *.exe

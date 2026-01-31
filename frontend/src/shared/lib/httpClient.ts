@@ -17,7 +17,7 @@ type AuthResponse = {
 }
 
 const MAX_RETRIES = 2
-let refreshTokenRequest: Promise<AuthResponse> | null = null
+let refreshTokenRequest: Promise<AuthResponse | null> | null = null
 
 const httpClient: AxiosInstance = axios.create({
   baseURL: ENV_CONFIG.API_BASE_URL,
@@ -90,10 +90,10 @@ async function refresher() {
 
 const handleRefreshToken = async (): Promise<AuthResponse | null> => {
   if (typeof window === 'undefined') return null
-  
+
   const { useAuthStore } = await import('@/features/auth/store/authStore')
   const refreshToken = useAuthStore.getState().refreshToken
-  
+
   if (!refreshToken) {
     clearAuthCookieClient()
     useAuthStore.getState().clearAuth()
@@ -109,14 +109,14 @@ const handleRefreshToken = async (): Promise<AuthResponse | null> => {
       },
       body: JSON.stringify({ refresh_token: refreshToken }),
     })
-    
+
     if (!res.ok) {
       clearAuthCookieClient()
       useAuthStore.getState().clearAuth()
       window.location.href = '/login'
       return null
     }
-    
+
     const data = await res.json()
     return data.data as AuthResponse
   } catch (error) {

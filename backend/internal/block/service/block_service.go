@@ -20,6 +20,7 @@ import (
 
 type BlockService interface {
 	CreateBlock(ctx context.Context, pageID uuid.UUID, blockType *model.BlockType, content *string, position int64, parentBlockID *uuid.UUID) (*model.Block, error)
+	CreateBlockWithMetadata(ctx context.Context, pageID uuid.UUID, blockType *model.BlockType, content *string, metadata model.JSONBMap, position int64, parentBlockID *uuid.UUID) (*model.Block, error)
 	GetBlockTypeByName(ctx context.Context, name string) (*model.BlockType, error)
 	GetBlock(ctx context.Context, id uuid.UUID) (*model.Block, error)
 	ListBlocksByPage(ctx context.Context, pageID uuid.UUID) ([]*model.Block, error)
@@ -27,6 +28,7 @@ type BlockService interface {
 	ListBlocksByParent(ctx context.Context, parentBlockID *uuid.UUID) ([]*model.Block, error)
 	ListBlocksByParentWithPagination(ctx context.Context, parentBlockID *uuid.UUID, pagReq *dto.PaginationRequest) ([]*model.Block, *dto.PaginationMeta, error)
 	UpdateBlock(ctx context.Context, id uuid.UUID, content *string) (*model.Block, error)
+	UpdateBlockWithMetadata(ctx context.Context, id uuid.UUID, content *string, metadata model.JSONBMap) (*model.Block, error)
 	DeleteBlock(ctx context.Context, id uuid.UUID) error
 	ReorderBlocks(ctx context.Context, pageID uuid.UUID, blockIDs []uuid.UUID) error
 	BatchSync(ctx context.Context, req *dto.BatchSyncRequest) (*dto.BatchSyncResponse, error)
@@ -101,6 +103,39 @@ func (s *blockService) CreateBlock(ctx context.Context, pageID uuid.UUID, blockT
 	block.BlockType = blockType
 
 	logger.LogServiceSuccess(s.logger, "create_block", zap.String("id", block.ID.String()))
+	return block, nil
+}
+
+func (s *blockService) CreateBlockWithMetadata(ctx context.Context, pageID uuid.UUID, blockType *model.BlockType, content *string, metadata model.JSONBMap, position int64, parentBlockID *uuid.UUID) (*model.Block, error) {
+	if err := validation.ValidateUUID(pageID, "page_id"); err != nil {
+		return nil, err
+	}
+
+	if blockType == nil {
+		return nil, validation.ValidateRequired(blockType, "block_type")
+	}
+
+	if metadata == nil {
+		metadata = make(model.JSONBMap)
+	}
+
+	block := &model.Block{
+		PageID:        pageID,
+		TypeID:        blockType.ID,
+		Content:       content,
+		Rank:          position,
+		ParentBlockID: parentBlockID,
+		Metadata:      metadata,
+	}
+
+	if err := s.repo.Create(ctx, block); err != nil {
+		logger.LogServiceError(s.logger, "create_block_with_metadata", err, zap.String("pageID", pageID.String()), zap.String("typeID", blockType.ID.String()))
+		return nil, err
+	}
+
+	block.BlockType = blockType
+
+	logger.LogServiceSuccess(s.logger, "create_block_with_metadata", zap.String("id", block.ID.String()))
 	return block, nil
 }
 
@@ -224,6 +259,50 @@ func (s *blockService) UpdateBlock(ctx context.Context, id uuid.UUID, content *s
 	return block, nil
 }
 
+func (s *blockService) UpdateBlockWithMetadata(ctx context.Context, id uuid.UUID, content *string, metadata model.JSONBMap) (*model.Block, error) {
+	if err := validation.ValidateUUID(id, "block_id"); err != nil {
+		return nil, err
+	}
+
+	block, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			appErr := appErrors.NewNotFoundError(
+				appErrors.CodeBlockNotFound,
+				messages.MsgBlockNotFound,
+				err,
+			)
+			logger.LogServiceError(s.logger, "update_block_with_metadata_not_found", appErr, zap.String("id", id.String()))
+			return nil, appErr
+		}
+
+		logger.LogServiceError(s.logger, "update_block_with_metadata_fetch", err, zap.String("id", id.String()))
+		return nil, err
+	}
+
+	if content != nil {
+		block.Content = content
+	}
+
+	if metadata != nil {
+		block.Metadata = metadata
+	}
+
+	if err := s.repo.Update(ctx, block); err != nil {
+		logger.LogServiceError(s.logger, "update_block_with_metadata_save", err, zap.String("id", id.String()))
+		return nil, err
+	}
+
+	if s.cacheServ != nil {
+		blockCacheKey := fmt.Sprintf(cache.BlockByIDPattern, id.String())
+		pageCacheKey := fmt.Sprintf(cache.BlocksByPagePattern, block.PageID.String())
+		_ = s.cacheServ.Delete(ctx, blockCacheKey, pageCacheKey)
+	}
+
+	logger.LogServiceSuccess(s.logger, "update_block_with_metadata", zap.String("id", id.String()))
+	return block, nil
+}
+
 func (s *blockService) DeleteBlock(ctx context.Context, id uuid.UUID) error {
 	if err := validation.ValidateUUID(id, "block_id"); err != nil {
 		return err
@@ -319,7 +398,14 @@ func (s *blockService) BatchSync(ctx context.Context, req *dto.BatchSyncRequest)
 			parentBlockID = &parsedID
 		}
 
-		block, err := s.CreateBlock(ctx, pageID, blockType, content, int64(createItem.Position), parentBlockID)
+		var block *model.Block
+		if createItem.BlockConfig != nil && len(createItem.BlockConfig) > 0 {
+			metadata := model.JSONBMap(createItem.BlockConfig)
+			block, err = s.CreateBlockWithMetadata(ctx, pageID, blockType, content, metadata, int64(createItem.Position), parentBlockID)
+		} else {
+			block, err = s.CreateBlock(ctx, pageID, blockType, content, int64(createItem.Position), parentBlockID)
+		}
+
 		if err != nil {
 			response.Errors = append(response.Errors, dto.BatchError{
 				OperationID: createItem.TempID,
@@ -391,8 +477,14 @@ func (s *blockService) BatchSync(ctx context.Context, req *dto.BatchSyncRequest)
 			content = block.Content
 		}
 
-		// Update block content
-		updatedBlock, err := s.UpdateBlock(ctx, blockID, content)
+		var updatedBlock *model.Block
+		if updateItem.BlockConfig != nil && len(updateItem.BlockConfig) > 0 {
+			metadata := model.JSONBMap(updateItem.BlockConfig)
+			updatedBlock, err = s.UpdateBlockWithMetadata(ctx, blockID, content, metadata)
+		} else {
+			updatedBlock, err = s.UpdateBlock(ctx, blockID, content)
+		}
+
 		if err != nil {
 			response.Errors = append(response.Errors, dto.BatchError{
 				OperationID: updateItem.ID,

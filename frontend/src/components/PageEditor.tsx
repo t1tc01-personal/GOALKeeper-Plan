@@ -321,11 +321,18 @@ export function PageEditor({ pageId }: PageEditorProps) {
       const tempId = generateTempId();
       const blockType = CONTENT_BLOCK_TYPES.find((t) => t.name === type) || CONTENT_BLOCK_TYPES[0];
 
+      // Handle framework types: map specific framework names (kanban, habit) to the generic 'framework_container'
+      // type expected by the backend, while preserving the specific type in metadata.
+      let backendType = blockType.name;
+      if (['kanban', 'habit'].includes(blockType.name)) {
+        backendType = 'framework_container';
+      }
+
       const newBlock: Block = {
         id: tempId,
         pageId: pageId,
-        type: blockType.name,
-        type_id: blockType.name,
+        type: backendType, // Use backend-compatible type
+        type_id: backendType,
         content: content,
         position: newPosition,
         parent_block_id: targetParentId || undefined, // undefined in interface vs null in DB? Check Block interface.
@@ -401,7 +408,7 @@ export function PageEditor({ pageId }: PageEditorProps) {
       });
 
       // Enqueue create operation to sync queue
-      console.log('[PageEditor] Enqueueing CREATE for:', tempId, { pageId, type: blockType.name });
+      console.log('[PageEditor] Enqueueing CREATE for:', tempId, { pageId, type: backendType });
       if (syncQueueRef.current) {
         syncQueueRef.current.enqueue({
           id: tempId,
@@ -409,7 +416,7 @@ export function PageEditor({ pageId }: PageEditorProps) {
           blockId: tempId,
           data: {
             pageId: pageId,
-            type: blockType.name,
+            type: backendType, // Send generic type to backend
             content: content,
             position: newPosition,
             parent_block_id: targetParentId || undefined,
@@ -419,6 +426,8 @@ export function PageEditor({ pageId }: PageEditorProps) {
           priority: 'normal',
         });
       }
+
+      return newBlock as Block;
     },
     [pageId, getAllBlocks]
   );
@@ -462,27 +471,24 @@ export function PageEditor({ pageId }: PageEditorProps) {
     (blockId: string, data: { content?: string; type?: string; blockConfig?: Record<string, any>; parent_block_id?: string | null }) => {
       console.log('[DEBUG handleUpdateBlock] blockId:', blockId, 'data:', data);
 
-      // CRITICAL: Check if content is being set to empty string
       if (data.content !== undefined && data.content === '') {
         console.warn('[DEBUG handleUpdateBlock] ⚠️ Content is empty string! BlockId:', blockId);
-        // console.trace('[DEBUG handleUpdateBlock] Stack trace for empty content');
       }
 
-      // GIẢI PHÁP: Luôn sử dụng prevBlocks để đảm bảo lấy dữ liệu mới nhất trong hàng đợi state
       setBlocks((prevBlocks) => {
         const existingBlock = prevBlocks.find((b) => b.id === blockId);
 
-        // Nếu không thấy trong blocks, có thể nó nằm trong pendingCreates (temp block)
         if (!existingBlock) {
           if (blockId.startsWith('temp-')) {
             setPendingCreates((prevPending) => {
               const next = new Map(prevPending);
               const block = next.get(blockId);
               if (block) {
+                const isFrameworkBlock = block.type === 'framework_container' || block.type_id === 'framework_container';
                 next.set(blockId, {
                   ...block,
                   ...(data.content !== undefined && { content: data.content }),
-                  ...(data.type !== undefined && { type: data.type, type_id: data.type }),
+                  ...(data.type !== undefined && !isFrameworkBlock && { type: data.type, type_id: data.type }),
                   ...(data.blockConfig !== undefined && { blockConfig: data.blockConfig, metadata: data.blockConfig }),
                 });
               }
@@ -492,28 +498,39 @@ export function PageEditor({ pageId }: PageEditorProps) {
           return prevBlocks;
         }
 
-        // Log blockConfig updates specifically
         if (data.blockConfig !== undefined) {
           console.log('[handleUpdateBlock] Updating blockConfig for', blockId);
           console.log('[handleUpdateBlock] Old blockConfig:', existingBlock.blockConfig);
           console.log('[handleUpdateBlock] New blockConfig:', data.blockConfig);
         }
 
-        // Cập nhật block thật với dữ liệu mới nhất từ prevBlocks
+        const isFrameworkBlock = existingBlock.type === 'framework_container' || existingBlock.type_id === 'framework_container';
+
+        if (isFrameworkBlock && data.type && data.type !== 'framework_container') {
+          console.warn('[handleUpdateBlock] ⚠️ Preventing type change for framework_container block!', {
+            blockId,
+            currentType: existingBlock.type,
+            attemptedType: data.type,
+            blockConfig: data.blockConfig
+          });
+        }
+
         return prevBlocks.map((b) =>
           b.id === blockId
             ? {
               ...b,
               ...(data.content !== undefined && { content: data.content }),
-              ...(data.type !== undefined && { type: data.type, type_id: data.type }),
+              ...(data.type !== undefined && !isFrameworkBlock && { type: data.type, type_id: data.type }),
               ...(data.blockConfig !== undefined && { blockConfig: data.blockConfig, metadata: data.blockConfig }),
             }
             : b
         );
       });
 
-      // Enqueue update operation
-      console.log('[PageEditor] Enqueueing update for:', blockId, data);
+      const allBlocks = getAllBlocks();
+      const block = allBlocks.find((b) => b.id === blockId);
+      const isFrameworkBlock = block && (block.type === 'framework_container' || block.type_id === 'framework_container');
+
       if (syncQueueRef.current) {
         syncQueueRef.current.enqueue({
           id: `update-${blockId}-${Date.now()}`,
@@ -521,7 +538,7 @@ export function PageEditor({ pageId }: PageEditorProps) {
           blockId: blockId,
           data: {
             content: data.content,
-            type: data.type,
+            type: (!isFrameworkBlock && data.type) ? data.type : undefined,
             parent_block_id: data.parent_block_id,
             blockConfig: data.blockConfig,
           },
@@ -530,7 +547,7 @@ export function PageEditor({ pageId }: PageEditorProps) {
         });
       }
     },
-    []
+    [getAllBlocks]
   );
 
   // Handle Indent (Tab)
@@ -1187,43 +1204,72 @@ export function PageEditor({ pageId }: PageEditorProps) {
         return;
       }
 
+      const blockTypeConfig = CONTENT_BLOCK_TYPES.find((t) => t.name === newType);
+      if (!blockTypeConfig) {
+        console.warn('Unknown block type:', newType);
+        return;
+      }
+
+      let backendType = newType;
+      let updatedBlockConfig = block.blockConfig || {};
+
+      if (['kanban', 'habit'].includes(newType)) {
+        backendType = 'framework_container';
+        updatedBlockConfig = {
+          ...blockTypeConfig.defaultMetadata,
+          framework_type: newType,
+        };
+        console.log('[handleTypeChange] Converting to framework_container:', {
+          requestedType: newType,
+          backendType,
+          blockConfig: updatedBlockConfig
+        });
+      }
+
       if (block.id.startsWith('temp-')) {
-        // Update pending block
         setPendingCreates((prev) => {
           const next = new Map(prev);
-          const updated = { ...block, type: newType, type_id: newType };
+          const updated = {
+            ...block,
+            type: backendType,
+            type_id: backendType,
+            blockConfig: updatedBlockConfig,
+            metadata: updatedBlockConfig
+          };
           next.set(blockId, updated);
           return next;
         });
       } else {
-        // Update on server - check if block still exists
         const existingBlock = blocks.find((b) => b.id === blockId);
         if (!existingBlock) {
           console.warn('Block not found in server blocks:', blockId);
           return;
         }
 
-        // Optimistic update
         setBlocks((prevBlocks) =>
           prevBlocks.map((b) =>
-            b.id === blockId ? { ...b, type: newType, type_id: newType } : b
+            b.id === blockId ? {
+              ...b,
+              type: backendType,
+              type_id: backendType,
+              blockConfig: updatedBlockConfig,
+              metadata: updatedBlockConfig
+            } : b
           )
         );
 
-        // Queue for batch sync
         if (syncQueueRef.current) {
           syncQueueRef.current.enqueue({
             id: `update-type-${blockId}-${Date.now()}`,
             type: 'update',
             blockId: blockId,
             data: {
-              type: newType,
+              type: backendType,
+              blockConfig: updatedBlockConfig,
             },
             timestamp: Date.now(),
           });
         }
-        // Note: No fallback - if queue is not available, optimistic update is enough
-        // The queue will be initialized on mount, so this should rarely happen
       }
     },
     [getAllBlocks, blocks]
@@ -1266,6 +1312,12 @@ export function PageEditor({ pageId }: PageEditorProps) {
 
       if (!draggedBlockId || draggedBlockId === dropBlockId) {
         setDraggedBlockId(null);
+        return;
+      }
+
+      // Security: If we don't know what is being dragged (internal state is null), ignore it
+      // This prevents external files/text from being processed as blocks
+      if (!draggedBlockId) {
         return;
       }
 
@@ -1404,6 +1456,7 @@ export function PageEditor({ pageId }: PageEditorProps) {
             onArrowUp={handleArrowUp}
             onArrowDown={handleArrowDown}
             onUpdateBlock={handleUpdateBlock}
+            onCreateBlock={createNewBlock as any}
             onDragStart={handleDragStart}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}

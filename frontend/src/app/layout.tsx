@@ -5,6 +5,7 @@ import { Toaster } from '@/components/ui/sonner'
 import QueryProvider from '@/shared/contexts/QueryProvider'
 import AuthProvider from '@/shared/contexts/AuthProvider'
 import NextTopLoader from 'nextjs-toploader'
+import { ClientInitializer } from '@/components/ClientInitializer'
 
 const inter = Inter({
   variable: '--font-inter',
@@ -26,6 +27,7 @@ export default function RootLayout({
       <body className={`${inter.variable} antialiased`}>
         <QueryProvider>
           <AuthProvider>
+            <ClientInitializer />
             {children}
           </AuthProvider>
           <NextTopLoader color="#5163FF" showSpinner={false} />

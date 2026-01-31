@@ -1,9 +1,8 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { workspaceApi, type Workspace, type Page } from '@/services/workspaceApi'
-import { blockApi, type Block } from '@/services/blockApi'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -11,7 +10,7 @@ import { toast } from 'sonner'
 import { PageEditor } from '@/components/PageEditor'
 import { useAuthStore } from '@/features/auth/store/authStore'
 
-export default function WorkspacePage() {
+function WorkspaceContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const { isAuthenticated } = useAuthStore()
@@ -69,7 +68,7 @@ export default function WorkspacePage() {
       setIsLoading(true)
       const data = await workspaceApi.listPages(workspaceId)
       setPages(data)
-      
+
       // If pageId is in URL, select that page
       if (pageId) {
         const page = data.find(p => p.id === pageId)
@@ -161,16 +160,7 @@ export default function WorkspacePage() {
     }
   }
 
-  // Show loading or redirect if not authenticated
-  if (!isAuthenticated) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-neutral-50">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-      </div>
-    )
-  }
-
-  if (isLoading) {
+  if (!isAuthenticated || isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-neutral-50">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
@@ -238,9 +228,8 @@ export default function WorkspacePage() {
             {pages.map((page) => (
               <div
                 key={page.id}
-                className={`p-2 rounded cursor-pointer hover:bg-neutral-100 flex justify-between items-center ${
-                  selectedPage?.id === page.id ? 'bg-neutral-100' : ''
-                }`}
+                className={`p-2 rounded cursor-pointer hover:bg-neutral-100 flex justify-between items-center ${selectedPage?.id === page.id ? 'bg-neutral-100' : ''
+                  }`}
                 onClick={() => {
                   setSelectedPage(page)
                   setEditedTitle(page.title)
@@ -316,5 +305,17 @@ export default function WorkspacePage() {
         )}
       </div>
     </div>
+  )
+}
+
+export default function WorkspacePage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-neutral-50">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    }>
+      <WorkspaceContent />
+    </Suspense>
   )
 }
