@@ -1,0 +1,71 @@
+model_list:
+  # --- Google (default, free) ---
+  - model_name: gemini-flash
+    litellm_params:
+      model: gemini/gemini-1.5-flash
+      api_key: os.environ/GEMINI_API_KEY
+  - model_name: gemini-pro
+    litellm_params:
+      model: gemini/gemini-1.5-pro
+      api_key: os.environ/GEMINI_API_KEY
+
+  # --- OpenAI ---
+  - model_name: gpt-4-turbo
+    litellm_params:
+      model: gpt-4-turbo-preview
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: gpt-3.5-turbo
+    litellm_params:
+      model: gpt-3.5-turbo
+      api_key: os.environ/OPENAI_API_KEY
+
+  # --- Azure Foundry (Azure OpenAI) ---
+  - model_name: azure-gpt-5-nano
+    litellm_params:
+      model: azure/gpt-5-nano
+      api_base: os.environ/AZURE_API_BASE
+      api_version: os.environ/AZURE_API_VERSION
+      # Azure AD Auth via env vars (AZURE_CLIENT_ID etc)
+
+  # --- Anthropic (Claude) ---
+  - model_name: claude-3-5-sonnet
+    litellm_params:
+      model: anthropic/claude-3-5-sonnet-20241022
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  # Embeddings (e.g. OpenAI for RAG)
+  - model_name: embeddings
+    litellm_params:
+      model: text-embedding-ada-002
+      api_key: os.environ/OPENAI_API_KEY
+
+router_settings:
+  routing_strategy: simple-shuffle
+  model_group_alias:
+    default: # Free/Cheap -> Fallback to Fast Paid
+      - gemini-flash
+      - gemini-pro
+    smart: # High Intelligence -> Fallback Order
+      - claude-3-5-sonnet
+      - gpt-4-turbo
+      - azure-gpt-5-nano
+    fast: # Low Latency
+      - gemini-flash
+      - gpt-3.5-turbo
+    embed:
+      - embeddings
+  
+  # Explicit Fallback Configuration
+  fallbacks:
+    - "gemini-flash": ["gpt-3.5-turbo", "azure-gpt-5-nano"]
+    - "gemini-pro": ["gpt-4-turbo", "claude-3-5-sonnet"]
+    - "claude-3-5-sonnet": ["gpt-4-turbo", "azure-gpt-5-nano"]
+
+general_settings:
+  master_key: ${LITELLM_MASTER_KEY}
+#  database_url: ${DATABASE_URL}
+#  cache: true
+#  cache_params:
+#    type: redis
+#    host: redis
+#    port: 6379

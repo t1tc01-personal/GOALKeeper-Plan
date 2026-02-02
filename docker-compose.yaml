@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:17-alpine
+    image: pgvector/pgvector:pg16
     container_name: goalkeeper-plan-postgres
     environment:
       POSTGRES_USER: goalkeeper
@@ -35,6 +35,23 @@ services:
     networks:
       - goalkeeper-network
 
+  litellm-proxy:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: litellm-proxy
+    ports:
+      - "8002:4000"
+    volumes:
+      - ./ai-service/litellm_config.yaml:/app/config.yaml
+    command: [ "--config", "/app/config.yaml" ]
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
+      - DATABASE_URL=${DATABASE_URL}
+    networks:
+      - goalkeeper-network
+
   backend:
     build:
       context: ./backend
@@ -46,6 +63,8 @@ services:
       REDIS_PORT: 6379
       REDIS_PASSWORD: ""
       AUTH_SECRET: "your-secret-key-change-in-production"
+      LITELLM_PROXY_URL: "http://litellm-proxy:4000"
+      R2_ENDPOINT: ${R2_ENDPOINT}
     ports:
       - "8000:8000"
     depends_on:
@@ -53,11 +72,33 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      litellm-proxy:
+        condition: service_started
     volumes:
       - ./backend/config:/app/config
     networks:
       - goalkeeper-network
     restart: unless-stopped
+
+  # Python AI Service
+  ai-service:
+    build: 
+      context: ./ai-service
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      - LITELLM_PROXY_URL=http://litellm-proxy:4000
+      - OPIK_URL=http://opik:5000
+      - OPIK_PROJECT_NAME=goalkeeper-ai
+      - DATABASE_URL=postgres://goalkeeper:goalkeeper123@postgres:5432/goalkeeper_plan?sslmode=disable
+      - R2_ENDPOINT=${R2_ENDPOINT}
+    depends_on:
+      - litellm-proxy
+      - opik
+      - postgres
+    networks:
+      - goalkeeper-network
 
 volumes:
   postgres_data:
