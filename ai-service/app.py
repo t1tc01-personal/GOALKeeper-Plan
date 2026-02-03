@@ -20,8 +20,11 @@ from fastapi import Response
 class Settings:
     """Application settings configuration"""
     fastapi_kwargs = {
-        "title": "AI Agent Service",
-        "version": "1.0.0",
+        "title": os.getenv("TITLE", "AI Agent Service"),
+        "version": os.getenv("VERSION", "1.0.0"),
+        "docs_url": os.getenv("DOCS_URL", "/docs"),
+        "redoc_url": os.getenv("REDOC_URL", "/redoc"),
+        "openapi_url": os.getenv("OPENAPI_URL", "/openapi.json"),
     }
     allowed_hosts = ["*"]  # Allow all origins in development
 

@@ -95,7 +95,6 @@ services:
       - R2_ENDPOINT=${R2_ENDPOINT}
     depends_on:
       - litellm-proxy
-      - opik
       - postgres
     networks:
       - goalkeeper-network

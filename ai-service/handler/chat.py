@@ -34,6 +34,10 @@ class ChatRequest(BaseModel):
             "so higher values (2048+) are recommended."
         ),
     )
+    model: Optional[str] = Field(
+        default="azure/gpt-5-nano",
+        description="Model to use for chat completion (e.g., 'azure/gpt-5-nano', 'gemini/gemini-3-flash-preview')"
+    )
 
     @model_validator(mode="after")
     def validate_messages(self) -> "ChatRequest":
@@ -52,6 +56,19 @@ class ChatResponse(BaseModel):
     reasoning: Optional[str] = Field(default=None, description="Model reasoning/thought process")
 
 
+class ModelInfo(BaseModel):
+    """Information about an available model."""
+    name: str # The alias used in API (smart, fast, etc.)
+    full_name: str # The real model ID (azure/gpt-5-nano, etc.)
+    provider: str
+    supports_thinking: bool = False
+
+
+class ModelListResponse(BaseModel):
+    """List of available models."""
+    models: List[ModelInfo]
+
+
 class ChatHandler:
     """Handle chat completion requests."""
 
@@ -60,9 +77,20 @@ class ChatHandler:
     _max_message_length = 1500  # Max chars per message (reduced)
 
     def __init__(self) -> None:
-        # We now use LiteLLM Proxy directly via the standard litellm library
-        # asking the proxy to route based on model name
-        pass
+        """Initialize ChatHandler with LiteLLM configuration."""
+        import litellm
+        import os
+        
+        # Configure LiteLLM to send requests to our Proxy (LiteLLM Proxy)
+        # Defaults to Docker internal name, but falls back to .env/localhost
+        self.api_base = os.getenv("LITELLM_PROXY_URL", "http://litellm-proxy:4000")
+        self.api_key = os.getenv("LITELLM_MASTER_KEY", "sk-1234")
+        
+        # Globally set litellm params to avoid per-call overhead
+        litellm.api_base = self.api_base
+        litellm.api_key = self.api_key
+        
+        logger.info(f"ChatHandler initialized using LiteLLM Proxy at: {self.api_base}")
 
     @staticmethod
     def _truncate_conversation_history(
@@ -179,6 +207,138 @@ class ChatHandler:
             "usage_metadata": usage_metadata,
         }
 
+    async def get_models(self) -> ModelListResponse:
+        """Get list of available models with provider info from litellm_config.yaml."""
+        import yaml
+        import os
+        
+        config_path = os.getenv("LITELLM_CONFIG_PATH", "litellm_config.yaml")
+        model_infos = []
+        seen_names = set()
+        
+        try:
+            if os.path.exists(config_path):
+                with open(config_path, "r") as f:
+                    config = yaml.safe_load(f)
+                    model_list = config.get("model_list", [])
+                    for m in model_list:
+                        name = m.get("model_name")
+                        if name and name not in seen_names:
+                            # Try to extract provider from 'model' param (e.g., 'azure/gpt-4' -> 'Azure')
+                            litellm_params = m.get("litellm_params", {})
+                            model_str = litellm_params.get("model", "")
+                            provider = "unknown"
+                            
+                            if "/" in model_str:
+                                raw_provider = model_str.split("/")[0].lower()
+                                # Prettify provider name
+                                provider_map = {
+                                    "azure": "Azure OpenAI (GPT)",
+                                    "gemini": "Google Gemini",
+                                    "openai": "OpenAI",
+                                    "anthropic": "Anthropic Claude",
+                                    "vertex_ai": "Google Vertex AI"
+                                }
+                                provider = provider_map.get(raw_provider, raw_provider.capitalize())
+                            
+                            # Extract metadata
+                            metadata = m.get("metadata", {})
+                            supports_thinking = metadata.get("supports_thinking", False)
+                            
+                            model_infos.append(ModelInfo(
+                                name=name,
+                                full_name=model_str,
+                                provider=provider,
+                                supports_thinking=supports_thinking
+                            ))
+                            seen_names.add(name)
+            
+            # Fallback if config is empty or failed
+            if not model_infos:
+                model_infos = [
+                    ModelInfo(name="azure/gpt-5-nano", full_name="azure/gpt-5-nano", provider="Azure OpenAI (GPT)", supports_thinking=False),
+                    ModelInfo(name="gemini/gemini-3-flash-preview", full_name="gemini/gemini-3-flash-preview", provider="Google Gemini", supports_thinking=False)
+                ]
+                
+        except Exception as e:
+            logger.error(f"Failed to load model list: {e}")
+            model_infos = [ModelInfo(name="error", full_name="error", provider=str(e), supports_thinking=False)]
+            
+        return ModelListResponse(models=model_infos)
+
+    def _adapt_payload(self, model: str, payload: ChatRequest) -> Dict[str, Any]:
+        """Adapt payload based on model capabilities (Thinking, O1 roles, etc.)"""
+        is_thinking = "reasoner" in model or "thinking" in model or "o1" in model or "o3" in model
+        
+        # 1. Manage Max Tokens
+        # Reasoning models need much more tokens as it includes thinking process
+        if is_thinking and (payload.max_completion_tokens is None or payload.max_completion_tokens < 16384):
+             # Don't override if user explicitly set a very high value
+             logger.info(f"Boosting max_completion_tokens for thinking model: {model}")
+             payload.max_completion_tokens = 16384
+
+        # 2. Extract OpenAI messages
+        openai_messages = self._to_openai_messages(payload.messages)
+
+        # 3. Handle O1/O3 role limitations
+        # OpenAI O1/O3 models don't support 'system' role in the usual way
+        if "o1-" in model or "o3-" in model:
+            logger.debug(f"Adapting roles for OpenAI reasoning model: {model}")
+            new_messages = []
+            for msg in openai_messages:
+                if msg["role"] == "system":
+                    # Convert system to 'developer' if supported or 'user' with prefix
+                    # LiteLLM handles 'developer' role for O1 usually, 
+                    # but some environments still prefer converting to user.
+                    new_messages.append({"role": "user", "content": f"[SYSTEM INSTRUCTION]\n{msg['content']}"})
+                else:
+                    new_messages.append(msg)
+            openai_messages = new_messages
+
+        return {
+            "model": f"openai/{model}", # Always route via proxy
+            "messages": openai_messages,
+            "temperature": payload.temperature,
+            "max_tokens": payload.max_completion_tokens,
+            "api_base": self.api_base,
+            "api_key": self.api_key
+        }
+
+    def _extract_content_from_chunk(self, chunk: Any) -> tuple[str, Optional[str]]:
+        """Extract content and reasoning from a LiteLLM stream chunk."""
+        content = ""
+        reasoning = None
+        
+        # LiteLLM returns chunks in OpenAI format
+        if hasattr(chunk, "choices") and chunk.choices:
+            delta = getattr(chunk.choices[0], "delta", None)
+            if delta:
+                if hasattr(delta, "reasoning_content") and delta.reasoning_content:
+                    reasoning = delta.reasoning_content
+                
+                if hasattr(delta, "content") and delta.content:
+                    content = delta.content
+                elif hasattr(delta, "text") and delta.text:
+                    content = delta.text
+        elif hasattr(chunk, "reasoning_content") and chunk.reasoning_content:
+            reasoning = chunk.reasoning_content
+        elif hasattr(chunk, "content"):
+            content = chunk.content or ""
+        elif hasattr(chunk, "text"):
+            content = chunk.text or ""
+        elif isinstance(chunk, str):
+            content = chunk
+        elif isinstance(chunk, dict):
+            # Handle dict format chunks
+            if "choices" in chunk and chunk["choices"]:
+                delta = chunk["choices"][0].get("delta", {})
+                content = delta.get("content", "") or delta.get("text", "")
+                reasoning = delta.get("reasoning_content")
+            elif "content" in chunk:
+                content = chunk["content"] or ""
+        
+        return content, reasoning
+
     async def chat(self, payload: ChatRequest) -> ChatResponse:
         """Process chat completion request."""
         # Truncate conversation history if needed
@@ -207,33 +367,13 @@ class ChatHandler:
         reasoning = None
 
         try:
-            # Use LiteLLM completion against our proxy
-            # We point to the local proxy via env vars or configuring litellm base_url if needed.
-            # However, since this service is running in Docker and 'litellm' lib is installed,
-            # we can just use the 'model' parameter which matches our proxy aliases if we point 
-            # litellm to the proxy URL, OR we just let the proxy handle it if we are the proxy?
-            # actually, we are the AI Service calling the Proxy.
-            
             import litellm
-            import os
             
-            # Configure LiteLLM to send requests to our Proxy
-            litellm.api_base = os.getenv("LITELLM_PROXY_URL", "http://litellm-proxy:4000")
-            litellm.api_key = os.getenv("LITELLM_MASTER_KEY", "sk-1234") 
-            
-            # Map input model or use default alias
-            model_to_use = "default" # Default to 'default' group
-            
-            # If user asks for specific model, map it to proxy alias
-            # For now, let's just use 'smart' for this chat endpoint as it was likely GPT-4 before
-            model_to_use = "openai/smart"
+            # Use adaptive logic to prepare request
+            requested_model = payload.model or "azure/gpt-5-nano"
+            completion_kwargs = self._adapt_payload(requested_model, payload)
 
-            response = await litellm.acompletion(
-                model=model_to_use, 
-                messages=openai_messages,
-                temperature=payload.temperature,
-                max_tokens=payload.max_completion_tokens,
-            )
+            response = await litellm.acompletion(**completion_kwargs)
             provider_name = response.model if hasattr(response, "model") else "unknown"
             logger.debug(f"Response from {provider_name}, type: {type(response)}")
 
@@ -396,67 +536,25 @@ class ChatHandler:
                 logger.debug("Starting to stream from LiteLLM...")
 
                 # Stream chunks from LiteLLM Proxy
-                
-                # Import litellm locally if not already (it is at top of file but we need to ensure proxy config)
-                # Proxy config is already set in chat() method or globally if we move it to init/app startup
-                # For safety, let's re-ensure it here or rely on previous set.
-                # Ideally, this config belongs in app startup but for now we put it inline to match previous refactor.
-                
+            
                 import litellm
-                import os
-                litellm.api_base = os.getenv("LITELLM_PROXY_URL", "http://litellm-proxy:4000")
-                litellm.api_key = os.getenv("LITELLM_MASTER_KEY", "sk-1234")
+                requested_model = payload.model or "azure/gpt-5-nano"
+                completion_kwargs = self._adapt_payload(requested_model, payload)
+                completion_kwargs["stream"] = True
 
-                model_to_use = "openai/smart" # Use smart alias for chat
-
-                async for chunk in await litellm.acompletion(
-                    model=model_to_use,
-                    messages=openai_messages,
-                    temperature=payload.temperature,
-                    max_tokens=payload.max_completion_tokens,
-                    stream=True
-                ):
+                async for chunk in await litellm.acompletion(**completion_kwargs):
                     provider_name = "proxy-model" # Proxy hides actual provider name often, or returns it in model field
                     chunks_received += 1
 
-                    # Extract content from LiteLLM chunk
-                    content = ""
-                    chunk_type = type(chunk).__name__
-
-                    # LiteLLM returns chunks in OpenAI format
-                    if hasattr(chunk, "choices") and chunk.choices:
-                        delta = getattr(chunk.choices[0], "delta", None)
-                        if delta:
-                            if hasattr(delta, "reasoning_content") and delta.reasoning_content:
-                                # Special handling for thinking/reasoning
-                                reasoning = delta.reasoning_content
-                                yield f"data: [THOUGHT] {reasoning}\n\n"
-                                chunks_received += 1
-                                continue
-                            
-                            if hasattr(delta, "content") and delta.content:
-                                content = delta.content
-                            elif hasattr(delta, "text") and delta.text:
-                                content = delta.text
-                    elif hasattr(chunk, "reasoning_content") and chunk.reasoning_content:
-                        yield f"data: [THOUGHT] {chunk.reasoning_content}\n\n"
+                    # Extract content using our refined parser
+                    content, reasoning = self._extract_content_from_chunk(chunk)
+                    
+                    if reasoning:
+                        yield f"data: [THOUGHT] {reasoning}\n\n"
                         chunks_received += 1
                         continue
-                    elif hasattr(chunk, "content"):
-                        content = chunk.content or ""
-                    elif hasattr(chunk, "text"):
-                        content = chunk.text or ""
-                    elif isinstance(chunk, str):
-                        content = chunk
-                    elif isinstance(chunk, dict):
-                        # Handle dict format chunks
-                        if "choices" in chunk and chunk["choices"]:
-                            delta = chunk["choices"][0].get("delta", {})
-                            content = delta.get("content", "") or delta.get("text", "")
-                        elif "content" in chunk:
-                            content = chunk["content"] or ""
-                        elif "text" in chunk:
-                            content = chunk["text"] or ""
+                    
+                    chunk_type = type(chunk).__name__
 
                     # Check for finish reason
                     if hasattr(chunk, "choices") and chunk.choices:
