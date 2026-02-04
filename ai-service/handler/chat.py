@@ -5,6 +5,7 @@ from fastapi.responses import StreamingResponse
 
 from loguru import logger
 from pydantic import BaseModel, Field, model_validator
+from core.settings import settings
 
 
 class ChatMessage(BaseModel):
@@ -36,7 +37,10 @@ class ChatRequest(BaseModel):
     )
     model: Optional[str] = Field(
         default="azure/gpt-5-nano",
-        description="Model to use for chat completion (e.g., 'azure/gpt-5-nano', 'gemini/gemini-3-flash-preview')"
+        description=(
+            "Model to use for chat completion (e.g., "
+            "'azure/gpt-5-nano', 'gemini/gemini-3-flash-preview')"
+        )
     )
 
     @model_validator(mode="after")
@@ -53,13 +57,16 @@ class ChatResponse(BaseModel):
 
     reply: str
     model: str
-    reasoning: Optional[str] = Field(default=None, description="Model reasoning/thought process")
+    reasoning: Optional[str] = Field(
+        default=None,
+        description="Model reasoning/thought process"
+    )
 
 
 class ModelInfo(BaseModel):
     """Information about an available model."""
-    name: str # The alias used in API (smart, fast, etc.)
-    full_name: str # The real model ID (azure/gpt-5-nano, etc.)
+    name: str  # The alias used in API (smart, fast, etc.)
+    full_name: str  # The real model ID (azure/gpt-5-nano, etc.)
     provider: str
     supports_thinking: bool = False
 
@@ -79,18 +86,35 @@ class ChatHandler:
     def __init__(self) -> None:
         """Initialize ChatHandler with LiteLLM configuration."""
         import litellm
-        import os
-        
+
         # Configure LiteLLM to send requests to our Proxy (LiteLLM Proxy)
-        # Defaults to Docker internal name, but falls back to .env/localhost
-        self.api_base = os.getenv("LITELLM_PROXY_URL", "http://litellm-proxy:4000")
-        self.api_key = os.getenv("LITELLM_MASTER_KEY", "sk-1234")
-        
+        # Using centralized settings
+        self.api_base = settings.litellm_proxy_url
+        self.api_key = settings.litellm_master_key
+
         # Globally set litellm params to avoid per-call overhead
         litellm.api_base = self.api_base
         litellm.api_key = self.api_key
-        
-        logger.info(f"ChatHandler initialized using LiteLLM Proxy at: {self.api_base}")
+
+        # Hybrid Caching settings
+        self._cached_models = None
+        self._last_model_refresh = 0
+        self._cache_ttl = 60  # L1 TTL: 60 seconds
+
+        # Redis Connection (L2 Cache)
+        import redis
+        self.redis_client = redis.Redis(
+            host=settings.redis_host,
+            port=settings.redis_port,
+            decode_responses=True,
+            socket_timeout=2.0
+        )
+        self.REDIS_CACHE_KEY = "ai-service:model-list"
+        self.REDIS_TTL = 300  # L2 TTL: 300 seconds
+
+        logger.info(
+            f"ChatHandler initialized using LiteLLM Proxy at: {self.api_base}"
+        )
 
     @staticmethod
     def _truncate_conversation_history(
@@ -168,7 +192,7 @@ class ChatHandler:
         """Convert ChatMessage list to OpenAI-compatible message format."""
         has_system = any(msg.role == "system" for msg in messages)
         converted: List[Dict[str, str]] = []
-        
+
         if not has_system:
             converted.append({
                 "role": "system",
@@ -187,35 +211,72 @@ class ChatHandler:
         """Extract finish_reason and usage_metadata from LiteLLM response."""
         finish_reason = None
         usage_metadata: Dict[str, Any] = {}
-        
+
         if hasattr(response, "choices") and response.choices:
             choice = response.choices[0]
             if hasattr(choice, "finish_reason"):
                 finish_reason = choice.finish_reason
-        
+
         if hasattr(response, "usage"):
             usage = response.usage
             usage_metadata = {
                 "prompt_tokens": getattr(usage, "prompt_tokens", 0),
                 "completion_tokens": getattr(usage, "completion_tokens", 0),
                 "total_tokens": getattr(usage, "total_tokens", 0),
-                "output_token_details": getattr(usage, "output_token_details", {})
+                "output_token_details": getattr(
+                    usage, "output_token_details", {}
+                )
             }
-        
+
         return {
             "finish_reason": finish_reason,
             "usage_metadata": usage_metadata,
         }
 
     async def get_models(self) -> ModelListResponse:
-        """Get list of available models with provider info from litellm_config.yaml."""
+        """
+        Get list of available models with provider info using Hybrid Caching.
+        L1: Local Memory -> L2: Redis -> L3: YAML Config
+        """
         import yaml
         import os
-        
+        import time
+        import json
+
+        current_time = time.time()
+
+        # --- Level 1: Local Memory Cache ---
+        if self._cached_models and (
+            current_time - self._last_model_refresh < self._cache_ttl
+        ):
+            logger.debug("L1 Cache Hit: Returning local memory cache")
+            return self._cached_models
+
+        # --- Level 2: Redis Cache ---
+        try:
+            cached_data = self.redis_client.get(self.REDIS_CACHE_KEY)
+            if cached_data:
+                logger.debug("L2 Cache Hit: Returning Redis cache")
+                models_data = json.loads(cached_data)
+                response = ModelListResponse(
+                    models=[ModelInfo(**m) for m in models_data]
+                )
+
+                # Update L1 Cache
+                self._cached_models = response
+                self._last_model_refresh = current_time
+                return response
+        except Exception as re:
+            logger.warning(
+                f"Redis L2 cache access failed: {re}. Falling back to L3."
+            )
+
+        # --- Level 3: YAML Config (File I/O) ---
+        logger.info("L1/L2 Cache Miss: Refreshing model list from YAML config")
         config_path = os.getenv("LITELLM_CONFIG_PATH", "litellm_config.yaml")
         model_infos = []
         seen_names = set()
-        
+
         try:
             if os.path.exists(config_path):
                 with open(config_path, "r") as f:
@@ -224,14 +285,12 @@ class ChatHandler:
                     for m in model_list:
                         name = m.get("model_name")
                         if name and name not in seen_names:
-                            # Try to extract provider from 'model' param (e.g., 'azure/gpt-4' -> 'Azure')
                             litellm_params = m.get("litellm_params", {})
                             model_str = litellm_params.get("model", "")
                             provider = "unknown"
-                            
+
                             if "/" in model_str:
                                 raw_provider = model_str.split("/")[0].lower()
-                                # Prettify provider name
                                 provider_map = {
                                     "azure": "Azure OpenAI (GPT)",
                                     "gemini": "Google Gemini",
@@ -239,12 +298,15 @@ class ChatHandler:
                                     "anthropic": "Anthropic Claude",
                                     "vertex_ai": "Google Vertex AI"
                                 }
-                                provider = provider_map.get(raw_provider, raw_provider.capitalize())
-                            
-                            # Extract metadata
+                                provider = provider_map.get(
+                                    raw_provider, raw_provider.capitalize()
+                                )
+
                             metadata = m.get("metadata", {})
-                            supports_thinking = metadata.get("supports_thinking", False)
-                            
+                            supports_thinking = metadata.get(
+                                "supports_thinking", False
+                            )
+
                             model_infos.append(ModelInfo(
                                 name=name,
                                 full_name=model_str,
@@ -252,30 +314,79 @@ class ChatHandler:
                                 supports_thinking=supports_thinking
                             ))
                             seen_names.add(name)
-            
-            # Fallback if config is empty or failed
+
+            # Fallback if config is empty
             if not model_infos:
                 model_infos = [
-                    ModelInfo(name="azure/gpt-5-nano", full_name="azure/gpt-5-nano", provider="Azure OpenAI (GPT)", supports_thinking=False),
-                    ModelInfo(name="gemini/gemini-3-flash-preview", full_name="gemini/gemini-3-flash-preview", provider="Google Gemini", supports_thinking=False)
+                    ModelInfo(
+                        name="azure/gpt-5-nano",
+                        full_name="azure/gpt-5-nano",
+                        provider="Azure OpenAI (GPT)",
+                        supports_thinking=False
+                    ),
+                    ModelInfo(
+                        name="gemini/gemini-3-flash-preview",
+                        full_name="gemini/gemini-3-flash-preview",
+                        provider="Google Gemini",
+                        supports_thinking=False
+                    )
                 ]
-                
-        except Exception as e:
-            logger.error(f"Failed to load model list: {e}")
-            model_infos = [ModelInfo(name="error", full_name="error", provider=str(e), supports_thinking=False)]
-            
-        return ModelListResponse(models=model_infos)
 
-    def _adapt_payload(self, model: str, payload: ChatRequest) -> Dict[str, Any]:
-        """Adapt payload based on model capabilities (Thinking, O1 roles, etc.)"""
-        is_thinking = "reasoner" in model or "thinking" in model or "o1" in model or "o3" in model
-        
+            response = ModelListResponse(models=model_infos)
+
+            # --- Update L1 and L2 Caches ---
+            self._cached_models = response
+            self._last_model_refresh = current_time
+
+            try:
+                # Store in Redis with TTL
+                serialized_data = json.dumps([m.dict() for m in model_infos])
+                self.redis_client.setex(
+                    self.REDIS_CACHE_KEY, self.REDIS_TTL, serialized_data
+                )
+                logger.debug(
+                    "Successfully updated L2 cache (Redis) with "
+                    f"{len(model_infos)} models"
+                )
+            except Exception as re:
+                logger.warning(f"Failed to update Redis L2 cache: {re}")
+
+            logger.info(f"Model list refreshed: {len(model_infos)} models")
+            return response
+
+        except Exception as e:
+            logger.error(f"Failed to load model list from YAML: {e}")
+            return ModelListResponse(
+                models=[
+                    ModelInfo(
+                        name="error",
+                        full_name="error",
+                        provider=str(e),
+                        supports_thinking=False
+                    )
+                ]
+            )
+
+    def _adapt_payload(
+        self, model: str, payload: ChatRequest
+    ) -> Dict[str, Any]:
+        """Adapt payload based on model capabilities."""
+        is_thinking = (
+            "reasoner" in model or "thinking" in model or
+            "o1" in model or "o3" in model
+        )
         # 1. Manage Max Tokens
-        # Reasoning models need much more tokens as it includes thinking process
-        if is_thinking and (payload.max_completion_tokens is None or payload.max_completion_tokens < 16384):
-             # Don't override if user explicitly set a very high value
-             logger.info(f"Boosting max_completion_tokens for thinking model: {model}")
-             payload.max_completion_tokens = 16384
+        # Reasoning models need much more tokens as it includes thinking
+        # process
+        if is_thinking and (
+            payload.max_completion_tokens is None or
+            payload.max_completion_tokens < 16384
+        ):
+            # Don't override if user explicitly set a very high value
+            logger.info(
+                f"Boosting max_completion_tokens for model: {model}"
+            )
+            payload.max_completion_tokens = 16384
 
         # 2. Extract OpenAI messages
         openai_messages = self._to_openai_messages(payload.messages)
@@ -287,16 +398,20 @@ class ChatHandler:
             new_messages = []
             for msg in openai_messages:
                 if msg["role"] == "system":
-                    # Convert system to 'developer' if supported or 'user' with prefix
-                    # LiteLLM handles 'developer' role for O1 usually, 
-                    # but some environments still prefer converting to user.
-                    new_messages.append({"role": "user", "content": f"[SYSTEM INSTRUCTION]\n{msg['content']}"})
+                    # Convert system to 'developer' if supported or 'user'
+                    # with prefix. LiteLLM handles 'developer' role for
+                    # O1 usually, but some environments still prefer
+                    # converting to user.
+                    new_messages.append({
+                        "role": "user",
+                        "content": f"[SYSTEM INSTRUCTION]\n{msg['content']}"
+                    })
                 else:
                     new_messages.append(msg)
             openai_messages = new_messages
 
         return {
-            "model": f"openai/{model}", # Always route via proxy
+            "model": f"openai/{model}",  # Always route via proxy
             "messages": openai_messages,
             "temperature": payload.temperature,
             "max_tokens": payload.max_completion_tokens,
@@ -304,18 +419,23 @@ class ChatHandler:
             "api_key": self.api_key
         }
 
-    def _extract_content_from_chunk(self, chunk: Any) -> tuple[str, Optional[str]]:
+    def _extract_content_from_chunk(
+        self, chunk: Any
+    ) -> tuple[str, Optional[str]]:
         """Extract content and reasoning from a LiteLLM stream chunk."""
         content = ""
         reasoning = None
-        
+
         # LiteLLM returns chunks in OpenAI format
         if hasattr(chunk, "choices") and chunk.choices:
             delta = getattr(chunk.choices[0], "delta", None)
             if delta:
-                if hasattr(delta, "reasoning_content") and delta.reasoning_content:
+                if (
+                    hasattr(delta, "reasoning_content") and
+                    delta.reasoning_content
+                ):
                     reasoning = delta.reasoning_content
-                
+
                 if hasattr(delta, "content") and delta.content:
                     content = delta.content
                 elif hasattr(delta, "text") and delta.text:
@@ -336,7 +456,6 @@ class ChatHandler:
                 reasoning = delta.get("reasoning_content")
             elif "content" in chunk:
                 content = chunk["content"] or ""
-        
         return content, reasoning
 
     async def chat(self, payload: ChatRequest) -> ChatResponse:
@@ -360,22 +479,27 @@ class ChatHandler:
             )
 
         # Convert messages to OpenAI format
-        openai_messages = self._to_openai_messages(payload.messages)
+        self._to_openai_messages(payload.messages)
 
         response: Any = None
+
         reply = ""
         reasoning = None
 
         try:
             import litellm
-            
+
             # Use adaptive logic to prepare request
             requested_model = payload.model or "azure/gpt-5-nano"
             completion_kwargs = self._adapt_payload(requested_model, payload)
 
             response = await litellm.acompletion(**completion_kwargs)
-            provider_name = response.model if hasattr(response, "model") else "unknown"
-            logger.debug(f"Response from {provider_name}, type: {type(response)}")
+            provider_name = (
+                response.model if hasattr(response, "model") else "unknown"
+            )
+            logger.debug(
+                f"Response from {provider_name}, type: {type(response)}"
+            )
 
             # Extract content from LiteLLM response
             if hasattr(response, "choices") and response.choices:
@@ -383,19 +507,23 @@ class ChatHandler:
                 if hasattr(choice, "message"):
                     message = choice.message
                     if hasattr(message, "content"):
-                        reply = message.content.strip() if message.content else ""
+                        reply = (
+                            message.content.strip() if message.content else ""
+                        )
                     elif hasattr(message, "text"):
-                        reply = message.text.strip() if message.text else ""
-                    
+                        reply = (
+                            message.text.strip() if message.text else ""
+                        )
+
                     if hasattr(message, "reasoning_content"):
                         reasoning = message.reasoning_content
                 elif hasattr(choice, "text"):
                     reply = choice.text.strip() if choice.text else ""
-            
+
             # Fallback: try to get content directly
             if not reply and hasattr(response, "content"):
                 reply = str(response.content).strip()
-            
+
             if not reasoning and hasattr(response, "reasoning_content"):
                 reasoning = response.reasoning_content
 
@@ -409,8 +537,9 @@ class ChatHandler:
                 output_tokens = usage_metadata.get("completion_tokens", 0)
                 if output_tokens > 0:
                     logger.warning(
-                        f"Response empty but {output_tokens} completion "
-                        f"tokens used. Consider increasing max_completion_tokens."
+                        "Response empty but {output_tokens} completion "
+                        "tokens used. Consider increasing "
+                        "max_completion_tokens."
                     )
 
         except HTTPException:
@@ -448,9 +577,9 @@ class ChatHandler:
                 status_code = 400
                 error_detail = (
                     f"Response was truncated (hit token limit). "
-                    f"Used {reasoning_tokens} tokens for reasoning without generating output. "
-                    f"Try increasing max_completion_tokens "
-                    f"(current: {max_tokens})."
+                    f"Used {reasoning_tokens} tokens for reasoning without "
+                    f"generating output. Try increasing "
+                    f"max_completion_tokens (current: {max_tokens})."
                 )
 
             logger.error(
@@ -518,7 +647,7 @@ class ChatHandler:
             )
 
         # Convert messages to OpenAI format
-        openai_messages = self._to_openai_messages(payload.messages)
+        self._to_openai_messages(payload.messages)
 
         async def generate_stream() -> AsyncIterator[str]:
             """Generate SSE stream with optimized batching."""
@@ -536,70 +665,76 @@ class ChatHandler:
                 logger.debug("Starting to stream from LiteLLM...")
 
                 # Stream chunks from LiteLLM Proxy
-            
+
                 import litellm
                 requested_model = payload.model or "azure/gpt-5-nano"
-                completion_kwargs = self._adapt_payload(requested_model, payload)
-                completion_kwargs["stream"] = True
+                comp_kwargs = self._adapt_payload(requested_model, payload)
+                comp_kwargs["stream"] = True
 
-                async for chunk in await litellm.acompletion(**completion_kwargs):
-                    provider_name = "proxy-model" # Proxy hides actual provider name often, or returns it in model field
+                async for chunk in await litellm.acompletion(**comp_kwargs):
+                    provider_name = "proxy-model"  # Proxy hides actual name
                     chunks_received += 1
 
                     # Extract content using our refined parser
-                    content, reasoning = self._extract_content_from_chunk(chunk)
-                    
-                    if reasoning:
-                        yield f"data: [THOUGHT] {reasoning}\n\n"
+                    cont, reas = self._extract_content_from_chunk(chunk)
+
+                    if reas:
+                        yield f"data: [THOUGHT] {reas}\n\n"
                         chunks_received += 1
                         continue
-                    
+
                     chunk_type = type(chunk).__name__
 
                     # Check for finish reason
                     if hasattr(chunk, "choices") and chunk.choices:
                         choice = chunk.choices[0]
-                        if hasattr(choice, "finish_reason") and choice.finish_reason:
+                        if (
+                            hasattr(choice, "finish_reason") and
+                            choice.finish_reason
+                        ):
                             finish_reason = choice.finish_reason
                             if finish_reason == "length":
                                 max_tokens = payload.max_completion_tokens
                                 logger.warning(
-                                    f"Chunk #{chunks_received} hit token limit! "
+                                    f"Chunk #{chunks_received} hit limit! "
                                     f"max_tokens={max_tokens}, "
-                                    f"input_messages={len(payload.messages)}, "
-                                    f"estimated_input_tokens={estimated_input_tokens}, "
-                                    f"provider={provider_name}. "
-                                    "Consider increasing max_completion_tokens if this is unintended."
+                                    f"input_msgs={len(payload.messages)}, "
+                                    f"est_tokens={estimated_input_tokens}, "
+                                    f"provider={provider_name}."
                                 )
 
+                        num_choices = len(chunk.choices) if hasattr(
+                            chunk, 'choices'
+                        ) else 0
                         logger.debug(
                             f"Chunk #{chunks_received} structure: "
-                            f"type={chunk_type}, "
-                            f"choice_count={len(chunk.choices) if hasattr(chunk, 'choices') else 0}"
+                            f"type={chunk_type}, count={num_choices}"
                         )
                         if hasattr(chunk, 'choices') and chunk.choices:
                             choice = chunk.choices[0]
                             logger.debug(
-                                f"Choice 0: delta={getattr(choice, 'delta', 'N/A')}, "
-                                f"finish_reason={getattr(choice, 'finish_reason', 'N/A')}"
+                                f"Choice 0: "
+                                f"delta={getattr(choice, 'delta', 'N/A')}, "
+                                f"finish_reason="
+                                f"{getattr(choice, 'finish_reason', 'N/A')}"
                             )
 
-                    if content:
-                        chunk_buffer += content
-                        buffer_size += len(content)
+                    if cont:
+                        chunk_buffer += cont
+                        buffer_size += len(cont)
 
                         logger.debug(
                             f"Chunk #{chunks_received} received: "
-                            f"type={chunk_type}, size={len(content)}, "
+                            f"type={chunk_type}, size={len(cont)}, "
                             f"buffer_size={buffer_size}, "
-                            f"preview={repr(content[:50])}"
+                            f"preview={repr(cont[:50])}"
                         )
 
                         # Flush buffer if threshold reached or sentence end
                         should_flush = (
                             buffer_size >= max_buffer_size or
                             any(
-                                content.endswith(ending)
+                                cont.endswith(ending)
                                 for ending in sentence_endings
                             )
                         )
@@ -621,7 +756,8 @@ class ChatHandler:
                     else:
                         empty_chunks += 1
                         logger.debug(
-                            f"Empty chunk #{chunks_received}: type={chunk_type}"
+                            f"Empty chunk #{chunks_received}: type="
+                            f"{chunk_type}"
                         )
 
                 # Check if we hit token limit early

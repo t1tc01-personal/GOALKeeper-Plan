@@ -35,9 +35,9 @@ class AppSettings(BaseAppSettings):
     version: str = "0.0.0"
 
     # CORS & Database
-    allowed_hosts: List[str] = Field(
+    allowed_hosts: Any = Field(
         default=["*"],
-        description="Allowed CORS hosts (comma-separated in .env)"
+        description="Allowed CORS hosts (comma-separated string or list)"
     )
     pool_size: int = Field(default=40, ge=1, description="Database pool size")
     max_overflow: int = Field(
@@ -45,6 +45,22 @@ class AppSettings(BaseAppSettings):
     )
     pool_recycle: int = Field(
         default=600, ge=1, description="Database pool recycle time (seconds)"
+    )
+
+    # Redis Settings
+    redis_host: str = Field(default="localhost", description="Redis host")
+    redis_port: int = Field(default=6379, description="Redis port")
+
+    # LiteLLM Proxy Settings
+    litellm_proxy_url: str = Field(
+        default="http://localhost:8002",
+        alias="LITELLM_PROXY_URL",
+        description="LiteLLM Proxy base URL"
+    )
+    litellm_master_key: str = Field(
+        default="sk-1234",
+        alias="LITELLM_MASTER_KEY",
+        description="LiteLLM Proxy master key"
     )
 
     # LiteLLM Provider-agnostic settings
@@ -154,8 +170,13 @@ class AppSettings(BaseAppSettings):
     def parse_allowed_hosts(cls, v: Any) -> List[str]:
         """Parse allowed_hosts from string or list."""
         if isinstance(v, str):
-            # Handle comma-separated string from .env
-            return [host.strip() for host in v.split(",") if host.strip()]
+            v = v.strip()
+            # Handle possible bracketed string from .env
+            if v.startswith("[") and v.endswith("]"):
+                v = v[1:-1]
+            if not v:
+                return ["*"]
+            return [host.strip().replace('"', '').replace("'", "") for host in v.split(",") if host.strip()]
         if isinstance(v, list):
             return v
         return ["*"]

@@ -1,48 +1,50 @@
-import os
-from typing import Callable
-from dotenv import load_dotenv
 
-# Load environment variables from .env file
-load_dotenv()
+from typing import Callable
+
+from dotenv import load_dotenv
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 from loguru import logger
+
 from api.routes.v1.hello_world import HelloWorldRoute
 from api.routes.v1.chat import ChatRoute
 from handler.hello_world import HelloWorldHandler
 from handler.chat import ChatHandler
 from utils.uts_scheduler import scheduler
-from fastapi import Response
+from core.settings import settings
 
 
-class Settings:
-    """Application settings configuration"""
-    fastapi_kwargs = {
-        "title": os.getenv("TITLE", "AI Agent Service"),
-        "version": os.getenv("VERSION", "1.0.0"),
-        "docs_url": os.getenv("DOCS_URL", "/docs"),
-        "redoc_url": os.getenv("REDOC_URL", "/redoc"),
-        "openapi_url": os.getenv("OPENAPI_URL", "/openapi.json"),
-    }
-    allowed_hosts = ["*"]  # Allow all origins in development
+# Load environment variables from .env file
+load_dotenv()
 
-
-settings = Settings()
+# Removed internal Settings class, using core.settings.settings
 
 
 class App:
+    """
+    Main Application class for the AI Service.
+
+    This class initializes the FastAPI application, sets up middleware,
+    configures routes, and manages startup/shutdown events.
+    """
     application: FastAPI
 
     def on_init_app(self) -> Callable:
+        """
+        Returns a callable for the application startup event.
+
+        This method initializes handlers, sets up routes, and starts the
+        background scheduler when the FastAPI application starts.
+        """
         async def start_app() -> None:
 
             hello_world_handle = HelloWorldHandler()
             chat_handler = ChatHandler()
             hello_world_router = HelloWorldRoute(hello_world_handle)
             chat_router = ChatRoute(chat_handler)
-            
+
             # Internal routes (RAG, Doc Processing)
             from handler.internal import InternalHandler
             from api.routes.v1.internal import InternalRoute
@@ -71,6 +73,11 @@ class App:
         return start_app
 
     def on_terminate_app(self) -> Callable:
+        """
+        Returns a callable for the application shutdown event.
+
+        This method handles cleanup tasks when the FastAPI application is stopping.
+        """
         @logger.catch
         async def stop_app() -> None:
             pass
@@ -78,6 +85,12 @@ class App:
         return stop_app
 
     def __init__(self):
+        """
+        Initializes the App instance.
+
+        Sets up the FastAPI application, configures middleware, and registers
+        startup and shutdown event handlers.
+        """
         self.application = FastAPI(**settings.fastapi_kwargs)
 
         self.application.add_middleware(
